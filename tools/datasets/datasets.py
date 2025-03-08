@@ -46,14 +46,15 @@ def get_dataloader(opt):
     )
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size=opt.batch_size,
+        batch_size=opt.train_batch_size,
         shuffle=True,
         num_workers=opt.num_workers,
         pin_memory=True,
+        drop_last=True,
     )
     valid_dataloader = torch.utils.data.DataLoader(
         valid_dataset,
-        batch_size=opt.batch_size,
+        batch_size=opt.valid_batch_size,
         shuffle=False,
         num_workers=opt.num_workers,
         pin_memory=True,
