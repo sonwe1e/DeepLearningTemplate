@@ -12,12 +12,13 @@ data_path: ''
 image_size: 384
 num_classes: 3
 in_chans: 3
-num_workers: 8
+num_workers: 16
 
 # Training settings
 epochs: 100
 train_batch_size: 32
 valid_batch_size: 32
+prefetch_queue_size: 16
 learning_rate: 0.0004
 weight_decay: 0.05
 accumulate_grad_batches: 1
