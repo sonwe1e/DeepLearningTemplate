@@ -1,34 +1,29 @@
-# General settings
-exp_name: baselinev1
-project: Test
-seed: 42
-resume: null
-save_wandb: true
-save_checkpoint_num: 3
-config: config.yaml
-
-# Data settings
-data_path: ''
-image_size: 384
-num_classes: 3
-in_chans: 3
-num_workers: 16
-
-# Training settings
-epochs: 100
-train_batch_size: 32
-valid_batch_size: 32
-prefetch_queue_size: 16
-learning_rate: 0.0004
-weight_decay: 0.05
 accumulate_grad_batches: 1
-gradient_clip_val: 1000000.0
-precision: bf16-mixed
-log_step: 50
-val_check: 1.0
+config: config.yaml
+data_path: ''
 devices: 0
-save_metric: val_loss
-
-# Model settings
+ema_decay: 0.999
+epochs: 100
+exp_name: baselinev1
+gradient_clip_val: 1000000.0
+image_size: 384
+in_chans: 3
+learning_rate: 0.0004
+log_step: 50
 model_name: resnet18d.ra2_in1k
+num_classes: 3
+num_workers: 16
+precision: bf16-mixed
+prefetch_queue_size: 16
 pretrained: true
+project: Test
+resume: null
+save_checkpoint_num: 3
+save_metric: valid_loss
+save_wandb: true
+seed: 42
+train_batch_size: 32
+use_ema: true
+val_check: 1.0
+valid_batch_size: 32
+weight_decay: 0.05
