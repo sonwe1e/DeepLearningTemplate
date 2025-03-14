@@ -32,5 +32,6 @@ save_checkpoint_num: 3 # 保存的检查点数量
 save_metric: valid_loss # 用于保存最佳模型的指标
 seed: 42 # 随机种子
 config: config.yaml # 配置文件名
-devices: 0 # 使用的设备，0代表GPU
+devices: # 使用的设备，0代表GPU
+- 0 
 val_check: 1.0 # 验证频率

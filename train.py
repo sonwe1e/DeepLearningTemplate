@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         accelerator="auto",
-        devices=[opt.devices],
+        devices=opt.devices,
         strategy="auto",
         max_epochs=opt.epochs,
         precision=opt.precision,
