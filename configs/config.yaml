@@ -1,29 +1,36 @@
-accumulate_grad_batches: 1
-config: config.yaml
-data_path: ''
-devices: 0
-ema_decay: 0.999
-epochs: 100
-exp_name: baselinev1
-gradient_clip_val: 1000000.0
-image_size: 384
-in_chans: 3
-learning_rate: 0.0004
-log_step: 50
-model_name: resnet18d.ra2_in1k
-num_classes: 3
-num_workers: 16
-precision: bf16-mixed
-prefetch_queue_size: 16
-pretrained: true
-project: Test
-resume: null
-save_checkpoint_num: 3
-save_metric: valid_loss
-save_wandb: true
-seed: 42
-train_batch_size: 32
-use_ema: true
-val_check: 1.0
-valid_batch_size: 32
-weight_decay: 0.05
+# 训练配置
+epochs: 100 # 训练轮数
+learning_rate: 0.0004 # 学习率
+train_batch_size: 32 # 训练批次大小
+valid_batch_size: 32 # 验证批次大小
+accumulate_grad_batches: 1 # 梯度累积批次
+gradient_clip_val: 1000000.0 # 梯度裁剪值
+weight_decay: 0.05 # 权重衰减
+precision: bf16-mixed # 精度模式
+resume: null # 恢复训练的检查点路径，如果为null则从头开始训练
+
+# 数据配置
+data_path: '' # 数据集路径
+image_size: 384 # 输入图像大小
+in_chans: 3 # 输入图像通道数
+num_classes: 3 # 分类类别数
+num_workers: 16 # 数据加载线程数
+prefetch_queue_size: 16 # 预取队列大小
+
+# 模型配置
+model_name: resnet18d.ra2_in1k # 模型名称
+pretrained: true # 是否使用预训练模型
+use_ema: true # 是否使用EMA（指数移动平均）
+ema_decay: 0.999 # EMA衰减率
+
+# 日志和保存配置
+project: Test # Wandb项目名称
+exp_name: baselinev1 # 实验名称
+save_wandb: true # 是否保存到wandb
+log_step: 50 # 日志记录频率
+save_checkpoint_num: 3 # 保存的检查点数量
+save_metric: valid_loss # 用于保存最佳模型的指标
+seed: 42 # 随机种子
+config: config.yaml # 配置文件名
+devices: 0 # 使用的设备，0代表GPU
+val_check: 1.0 # 验证频率
