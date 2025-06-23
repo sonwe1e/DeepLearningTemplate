@@ -12,6 +12,7 @@
 - **混合精度训练**：支持 bf16/fp16 混合精度训练加速
 - **EMA 优化**：内置指数移动平均(EMA)提升模型性能
 - **多 GPU 训练**：支持单机多卡和分布式训练
+- **模型自动注册与参数灵活传递**：自动发现 `tools/models/` 目录下的所有模型类，支持通过配置灵活传递模型参数
 
 ## 快速开始
 
@@ -71,12 +72,18 @@ in_chans: 3 # 输入通道数
 num_classes: 3 # 分类类别数
 ```
 
-### 模型定义
+### 模型定义与注册机制
 
 ```yaml
-model_name: resnet18d.ra2_in1k # timm模型名称
-pretrained: true # 是否使用预训练权重
+model:
+  model_name: test_network # 模型名称，自动从 tools/models/ 目录下注册
+  model_kwargs:
+    in_channels: 3
+    num_classes: 3
 ```
+
+- **模型自动注册机制**：框架会自动扫描 `tools/models/` 目录下所有以 `nn.Module` 为基类的模型类，并注册到模型仓库，无需手动导入。
+- **灵活参数传递**：通过 `model_kwargs` 可为模型构造函数传递任意参数，支持自定义模型结构和超参数。
 
 ### 训练策略
 
@@ -107,14 +114,17 @@ save_metric: valid_loss # 保存checkpoint的监控指标
 
 ## 命令行参数
 
-所有 YAML 配置参数都可以通过命令行覆盖：
+所有 YAML 配置参数都可以通过命令行覆盖，支持嵌套参数：
 
 ```bash
 # 修改学习率和实验名称
 python train.py --learning_rate 0.001 --exp_name high_lr_experiment
 
 # 修改模型和批次大小
-python train.py --model_name efficientnet_b0 --train_batch_size 64
+python train.py --model.model_name efficientnet_b0 --train_batch_size 64
+
+# 修改模型参数
+python train.py --model.model_kwargs.in_channels 1 --model.model_kwargs.num_classes 5
 
 # 禁用EMA和wandb
 python train.py --use_ema --save_wandb
@@ -141,15 +151,29 @@ experiments/
 
 ```
 .
-├── configs/                    # 配置文件目录
+├── configs/                   # 配置文件目录
 │   ├── config.yaml            # 主配置文件
 │   └── option.py              # 配置加载和命令行解析
 ├── tools/                     # 工具模块
 │   ├── datasets/              # 数据集相关
-│   │   └── datasets.py        # 数据加载器
-│   ├── models/                # 模型定义
+│   │   ├── datasets.py        # 标准数据加载器
+│   │   ├── datasetsv2.py      # 支持预取/多线程的数据加载器
+│   │   └── augments.py        # 数据增强与变换
+│   ├── models/                # 模型定义（自动注册）
+│   │   ├── __init__.py
+│   │   ├── test_model1.py
+│   │   ├── test_model2.py
+│   │   └── ...                # 其他自定义模型
 │   ├── losses/                # 损失函数
+│   │   └── losses.py
+│   ├── utils.py               # 通用工具函数
+│   ├── model_registry.py      # 模型注册与发现机制
 │   └── pl_tool.py             # Lightning模块和EMA实现
+├── experiments                # 保存训练参数以及权重
+│   └── exp_name_timestamp     # 实验名称和当前时间
+│       ├── save_config.yaml   # 结合 yaml 和命令行输入的配置文件
+│       └── checkpoints/       # 保存权重文件夹
+├── wandb/                     # 保存 wandb 数据文件夹
 ├── train.py                   # 训练脚本
 ├── test.py                    # 测试脚本
 ├── requirements.txt           # 依赖列表
@@ -170,11 +194,13 @@ experiments/
 
 ### 多 GPU 训练
 
-```bash
+```yaml
 # 使用多张GPU
-python train.py --devices [0,1,2,3]
-
-# 框架会自动选择合适的策略（DDP/FSDP等）
+devices:
+  - 0
+  - 1
+  - 2
+# 若网络中存在未使用的参数需要设置 strategy="ddp_find_unused_parameters_true"
 ```
 
 ### 混合精度训练
@@ -195,6 +221,30 @@ python train.py --accumulate_grad_batches 4
 ```
 
 ## 扩展指南
+
+### 添加新的模型（自动注册）
+
+只需在 `tools/models/` 目录下添加新的模型类（继承自 `nn.Module`），框架会自动注册：
+
+```python
+# tools/models/my_custom_model.py
+import torch.nn as nn
+
+class MyCustomModel(nn.Module):
+    def __init__(self, in_channels=3, num_classes=10):
+        super().__init__()
+        # ...模型结构...
+```
+
+然后在配置文件或命令行中指定：
+
+```yaml
+model:
+  model_name: MyCustomModel
+  model_kwargs:
+    in_channels: 3
+    num_classes: 10
+```
 
 ### 添加新的数据集
 

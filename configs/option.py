@@ -102,7 +102,7 @@ def get_option(
 
         # --- 6. 将最终有效配置保存到新目录 ---
         # 这是关键的修改：写入到新的、本次运行专属的配置文件中
-        effective_config_path = exp_path / "effective_config.yaml"
+        effective_config_path = exp_path / "save_config.yaml"
         with open(effective_config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(final_config, f, allow_unicode=True, sort_keys=False)
 
