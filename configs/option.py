@@ -93,21 +93,20 @@ def get_option(
             final_config[k] = v
 
     # --- 5. 创建唯一的实验目录 ---
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    exp_name = final_config.get("exp_name", "default-exp")
-    project_name = final_config.get("project", "default-project")
-
-    exp_path = Path(output_root) / project_name / f"{exp_name}_{timestamp}"
-    exp_path.mkdir(parents=True, exist_ok=True)
-
-    # --- 6. 将最终有效配置保存到新目录 ---
-    # 这是关键的修改：写入到新的、本次运行专属的配置文件中
-    effective_config_path = exp_path / "effective_config.yaml"
-    with open(effective_config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(final_config, f, allow_unicode=True, sort_keys=False)
-
-    # --- 7. 打印并返回 ---
     if verbose:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        exp_name = final_config.get("exp_name", "default-exp")
+
+        exp_path = Path(output_root) / f"{exp_name}_{timestamp}"
+        exp_path.mkdir(parents=True, exist_ok=True)
+
+        # --- 6. 将最终有效配置保存到新目录 ---
+        # 这是关键的修改：写入到新的、本次运行专属的配置文件中
+        effective_config_path = exp_path / "effective_config.yaml"
+        with open(effective_config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(final_config, f, allow_unicode=True, sort_keys=False)
+
+        # --- 7. 打印并返回 ---
         print("=" * 40)
         print(f"原始配置文件: {config_path_obj.resolve()}")
         print(f"实验输出目录: {exp_path.resolve()}")
@@ -117,10 +116,10 @@ def get_option(
             print(f"{k:<20}: {v}")
         print("=" * 40)
 
-    # 添加实验路径到配置中，方便后续代码（如模型保存）直接使用
-    final_config["exp_path"] = str(exp_path)
+        # 添加实验路径到配置中，方便后续代码（如模型保存）直接使用
+        final_config["exp_path"] = str(exp_path)
 
-    return argparse.Namespace(**final_config)
+    return argparse.Namespace(**final_config), exp_path if verbose else None
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ if __name__ == "__main__":
     set_default_config_path("/media/hdd/sonwe1e/Template/configs/config.yaml")
 
     # 现在可以直接调用 get_option()，它会使用上面设置的路径
-    opt = get_option()
+    opt, checkpoint_path = get_option()
 
     # 导入数据集相关模块 - 现在它们会使用正确的配置路径
     from tools.datasets.datasets import *
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         gradient_clip_val=opt.gradient_clip_val,
         callbacks=[
             pl.callbacks.ModelCheckpoint(
-                dirpath=os.path.join("./checkpoints", opt.exp_name),
+                dirpath=os.path.join(checkpoint_path, "./checkpoints"),
                 monitor=f"loss/{opt.save_metric}",
                 mode="min",
                 save_top_k=opt.save_checkpoint_num,

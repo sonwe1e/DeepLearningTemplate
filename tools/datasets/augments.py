@@ -5,7 +5,7 @@ from configs.option import get_option
 
 def get_transforms():
     """获取数据变换，延迟加载配置"""
-    opt = get_option(verbose=False)
+    opt, _ = get_option(verbose=False)
 
     train_transform = A.Compose(
         [
