@@ -24,7 +24,7 @@ pip install -r requirements.txt
 
 ### 2. 准备数据集
 
-将数据集放置在指定路径，确保数据集结构符合要求。
+将数据集放置在指定路径，需要自行调整 dataset 的能够准确提取到需要的数据。
 
 ### 3. 配置参数
 
@@ -55,10 +55,10 @@ log_step: 50 # 每多少步记录一次日志
 ### 硬件与性能配置
 
 ```yaml
-devices: [5] # 使用的GPU设备ID列表
-num_workers: 16 # 数据加载器工作进程数
+devices: 5 # 使用的GPU设备ID列表
+num_workers: 8 # 数据加载器工作进程数
 precision: bf16-mixed # 训练精度 (fp32/fp16/bf16-mixed)
-prefetch_queue_size: 16 # 数据预取队列大小
+prefetch_queue_size: 16 # 数据预取队列大小（如果使用 datasetv2）
 ```
 
 ### 数据管道
@@ -68,8 +68,6 @@ data_path: "" # 数据集根路径
 train_batch_size: 32 # 训练批次大小
 valid_batch_size: 32 # 验证批次大小
 image_size: 384 # 输入图像尺寸
-in_chans: 3 # 输入通道数
-num_classes: 3 # 分类类别数
 ```
 
 ### 模型定义与注册机制
@@ -90,7 +88,7 @@ model:
 ```yaml
 epochs: 100 # 训练轮数
 val_check: 1.0 # 验证频率 (1.0表示每个epoch验证一次)
-accumulate_grad_batches: 1 # 梯度累积步数
+accumulate_grad_batches: 1 # 梯度累积步数，默认不进行梯度累积
 use_ema: true # 是否使用指数移动平均
 ema_decay: 0.999 # EMA衰减率
 ```
@@ -100,7 +98,7 @@ ema_decay: 0.999 # EMA衰减率
 ```yaml
 learning_rate: 0.0004 # 初始学习率
 weight_decay: 0.05 # 权重衰减
-gradient_clip_val: 1000000.0 # 梯度裁剪阈值
+gradient_clip_val: 1000000.0 # 梯度裁剪阈值（默认不进行裁剪）
 pct_start: 0.1 # OneCycleLR调度器参数
 ```
 
@@ -121,10 +119,7 @@ save_metric: valid_loss # 保存checkpoint的监控指标
 python train.py --learning_rate 0.001 --exp_name high_lr_experiment
 
 # 修改模型和批次大小
-python train.py --model.model_name efficientnet_b0 --train_batch_size 64
-
-# 修改模型参数
-python train.py --model.model_kwargs.in_channels 1 --model.model_kwargs.num_classes 5
+python train.py --model.model_name test_network --train_batch_size 64
 
 # 禁用EMA和wandb
 python train.py --use_ema --save_wandb
@@ -140,8 +135,8 @@ python train.py --resume /path/to/checkpoint.ckpt
 ```
 experiments/
 └── Test/                       # 项目名称
-    └── baselinev1_2024-01-15_14-30-00/  # 实验名称_时间戳
-        ├── effective_config.yaml         # 本次实验的有效配置
+    └── exp_name_2024-01-15_14-30-00/  # 实验名称_时间戳
+        ├── save_config.yaml         # 本次实验的有效配置
         └── checkpoints/                   # 模型检查点
             ├── epoch_10-loss_0.123.ckpt
             └── last.ckpt
