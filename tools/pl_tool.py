@@ -1,6 +1,6 @@
 import torch
 import lightning.pytorch as pl
-
+from .model_registry import get_model
 
 torch.set_float32_matmul_precision("high")
 
@@ -49,7 +49,19 @@ class LightningModule(pl.LightningModule):
         self.learning_rate = opt.learning_rate  # 学习率
         self.len_trainloader = len_trainloader  # 训练数据加载器长度
         self.opt = opt  # 配置参数
-        self.model = model  # 模型
+        # 动态加载模型
+        if model is None:
+            model_kwargs = {
+                "input_channels": getattr(opt, "in_chans", 3),
+                "num_classes": getattr(opt, "num_classes", 10),
+            }
+            # 过滤掉 None 值的参数
+            model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
+
+            self.model = get_model(opt.model_name, **model_kwargs)
+            print(f"动态加载模型: {opt.model_name}")
+        else:
+            self.model = model  # 使用传入的模型
         self.loss1 = torch.nn.CrossEntropyLoss()
 
         self.use_ema = getattr(opt, "use_ema", True)

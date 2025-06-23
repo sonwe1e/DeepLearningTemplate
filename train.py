@@ -1,6 +1,11 @@
 import torch
 from configs.option import get_option, set_default_config_path
 import os
+import lightning.pytorch as pl
+from lightning.pytorch.loggers import WandbLogger
+from tools.pl_tool import LightningModule
+import wandb
+
 
 torch.set_float32_matmul_precision("high")
 
@@ -13,20 +18,19 @@ if __name__ == "__main__":
 
     # 导入数据集相关模块 - 现在它们会使用正确的配置路径
     from tools.datasets.datasets import *
-    from tools.pl_tool import *
-    import lightning.pytorch as pl
-    from lightning.pytorch.loggers import WandbLogger
-    import wandb
+    from tools.model_registry import list_available_models, get_model
 
+    # 设置随机种子
+    pl.seed_everything(opt.seed)
+
+    # 打印可用模型
+    print("可用模型列表:")
+    for model_name in list_available_models():
+        print(f"  - {model_name}")
+
+    # 获取数据加载器
     """定义网络"""
-    import timm
-
-    model = timm.create_model(
-        opt.model_name,
-        num_classes=opt.num_classes,
-        in_chans=opt.in_chans,
-        pretrained=opt.pretrained,
-    )
+    model = get_model(opt.model["model_name"], **opt.model["model_kwargs"])
     """模型编译"""
     # model = torch.compile(model)
     """导入数据集"""
