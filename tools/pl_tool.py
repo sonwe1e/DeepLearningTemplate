@@ -79,9 +79,7 @@ class LightningModule(pl.LightningModule):
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=self.learning_rate,
-            total_steps=self.len_trainloader
-            * self.opt.epochs
-            // len(self.opt.devices),  # 多卡训练时 steps 会混乱
+            total_steps=self.len_trainloader * self.opt.epochs,
             pct_start=self.opt.pct_start,
         )
         return {
