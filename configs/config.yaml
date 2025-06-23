@@ -29,18 +29,17 @@ prefetch_queue_size: 16 # DataLoader 预取队列，与 num_workers 配合
 data_path: ""
 train_batch_size: 32
 valid_batch_size: 32
+image_size: 384
 
 # ===================================================================
 # 模型定义 (Model Definition)
 # ===================================================================
-# 架构与初始化
-model_name: resnet18d.ra2_in1k
-pretrained: true
-
-# 输入输出维度 (这些参数直接决定了模型的首层和末层)
-image_size: 384
-in_chans: 3
-num_classes: 3
+# 架构与初始化 - 现在可以直接使用 tools/models/ 目录下的模型类名
+model:
+  model_name: test_network
+  model_kwargs:
+    in_channels: 3
+    num_classes: 3
 
 # ===================================================================
 # 训练策略 (Training Strategy)
