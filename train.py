@@ -1,17 +1,23 @@
 import torch
-from configs.option import get_option
-from tools.datasets.datasets import *
-from tools.pl_tool import *
-import lightning.pytorch as pl
-from lightning.pytorch.loggers import WandbLogger
-import wandb
+from configs.option import get_option, set_default_config_path
 import os
 
 torch.set_float32_matmul_precision("high")
 
-
 if __name__ == "__main__":
+    # 设置配置文件路径 - 这样所有后续的 get_option 调用都会使用这个路径
+    set_default_config_path("/media/hdd/sonwe1e/Template/configs/config.yaml")
+
+    # 现在可以直接调用 get_option()，它会使用上面设置的路径
     opt = get_option()
+
+    # 导入数据集相关模块 - 现在它们会使用正确的配置路径
+    from tools.datasets.datasets import *
+    from tools.pl_tool import *
+    import lightning.pytorch as pl
+    from lightning.pytorch.loggers import WandbLogger
+    import wandb
+
     """定义网络"""
     import timm
 

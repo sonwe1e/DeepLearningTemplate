@@ -1,37 +1,74 @@
-# 训练配置
-epochs: 100 # 训练轮数
-learning_rate: 0.0004 # 学习率
-train_batch_size: 32 # 训练批次大小
-valid_batch_size: 32 # 验证批次大小
-accumulate_grad_batches: 1 # 梯度累积批次
-gradient_clip_val: 1000000.0 # 梯度裁剪值
-weight_decay: 0.05 # 权重衰减
-precision: bf16-mixed # 精度模式
-resume: null # 恢复训练的检查点路径，如果为null则从头开始训练
+# ===================================================================
+# 实验管理与日志 (Experiment Management & Logging)
+# ===================================================================
+# 核心标识符与可复现性设置
+project: Test
+exp_name: baselinev1
+seed: 42
 
-# 数据配置
-data_path: '' # 数据集路径
-image_size: 384 # 输入图像大小
-in_chans: 3 # 输入图像通道数
-num_classes: 3 # 分类类别数
-num_workers: 16 # 数据加载线程数
-prefetch_queue_size: 16 # 预取队列大小
+# 日志与监控
+save_wandb: true
+log_step: 50
 
-# 模型配置
-model_name: resnet18d.ra2_in1k # 模型名称
-pretrained: true # 是否使用预训练模型
-use_ema: true # 是否使用EMA（指数移动平均）
-ema_decay: 0.999 # EMA衰减率
+# ===================================================================
+# 硬件与性能配置 (Hardware & Performance)
+# ===================================================================
+# 硬件资源
+devices:
+  - 5
+num_workers: 16
 
-# 日志和保存配置
-project: Test # Wandb项目名称
-exp_name: baselinev1 # 实验名称
-save_wandb: true # 是否保存到wandb
-log_step: 50 # 日志记录频率
-save_checkpoint_num: 3 # 保存的检查点数量
-save_metric: valid_loss # 用于保存最佳模型的指标
-seed: 42 # 随机种子
-config: config.yaml # 配置文件名
-devices: # 使用的设备，0代表GPU
-- 0 
-val_check: 1.0 # 验证频率
+# 性能优化
+precision: bf16-mixed
+prefetch_queue_size: 16 # DataLoader 预取队列，与 num_workers 配合
+
+# ===================================================================
+# 数据管道 (Data Pipeline)
+# ===================================================================
+# 数据源与尺寸
+data_path: ""
+train_batch_size: 32
+valid_batch_size: 32
+
+# ===================================================================
+# 模型定义 (Model Definition)
+# ===================================================================
+# 架构与初始化
+model_name: resnet18d.ra2_in1k
+pretrained: true
+
+# 输入输出维度 (这些参数直接决定了模型的首层和末层)
+image_size: 384
+in_chans: 3
+num_classes: 3
+
+# ===================================================================
+# 训练策略 (Training Strategy)
+# ===================================================================
+# 核心循环
+epochs: 100
+val_check: 1.0 # 每个 epoch 结束后进行验证
+
+# 梯度与EMA
+accumulate_grad_batches: 1
+use_ema: true
+ema_decay: 0.999
+
+# ===================================================================
+# 优化器与学习率调度 (Optimizer & LR Scheduler)
+# ===================================================================
+# 优化器参数
+learning_rate: 0.0004
+weight_decay: 0.05
+gradient_clip_val: 1000000.0
+
+# 学习率调度器参数 OneCycleLR 调度器
+pct_start: 0.1
+
+# ===================================================================
+# 模型保存与恢复 (Checkpointing & Resuming)
+# ===================================================================
+# 状态管理
+resume: null
+save_checkpoint_num: 3
+save_metric: valid_loss
