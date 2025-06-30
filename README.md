@@ -1,6 +1,11 @@
 # 深度学习训练框架
 
 本框架基于 PyTorch Lightning，专为图像分类任务设计，提供灵活的配置和实验管理功能。
+## 最新更改
+--
+- **[Jun 2025]** 添加推理示例代码和 ONNX 示例代码（推理代码支持单图预测和 val_dataloader 预测，具体的指标需要自己重新定义；ONNX 的导出和测试代码来源于 Pytorch 官方 tutorial）
+- **[Jun 2025]** 在 train.py、pl_tool.py 和 datasets.py 添加注释和引导
+- **[Jun 2025]** 添加模型注册机制（在 tools/models/test_model1.py 文件中定义自己的模型后，可以直接在 config.yaml 中导入并在 model_kwarg 添加模型的参数）
 
 ## 主要特性
 
@@ -12,6 +17,7 @@
 - **混合精度训练**：支持 bf16/fp16 混合精度训练加速
 - **EMA 优化**：内置指数移动平均(EMA)提升模型性能
 - **多 GPU 训练**：支持单机多卡和分布式训练
+- **支持ONNX**：添加了 ONNX 的导出和测试代码
 - **模型自动注册与参数灵活传递**：自动发现 `tools/models/` 目录下的所有模型类，支持通过配置灵活传递模型参数
 
 ## 快速开始
@@ -149,6 +155,9 @@ experiments/
 ├── configs/                   # 配置文件目录
 │   ├── config.yaml            # 主配置文件
 │   └── option.py              # 配置加载和命令行解析
+├── temp_data/                 # 存放临时文件
+│   ├── cat.png                # 测试图片
+│   ├── test.onnx              # 测试导出 ONNX 文件
 ├── tools/                     # 工具模块
 │   ├── datasets/              # 数据集相关
 │   │   ├── datasets.py        # 标准数据加载器
@@ -161,13 +170,15 @@ experiments/
 │   │   └── ...                # 其他自定义模型
 │   ├── losses/                # 损失函数
 │   │   └── losses.py
+│   ├── example_predict.py     # 单图推理和 dataloader 示例代码
+│   ├── example_export.py      # ONNX 导出示例代码
 │   ├── utils.py               # 通用工具函数
 │   ├── model_registry.py      # 模型注册与发现机制
 │   └── pl_tool.py             # Lightning模块和EMA实现
 ├── experiments                # 保存训练参数以及权重
 │   └── exp_name_timestamp     # 实验名称和当前时间
 │       ├── save_config.yaml   # 结合 yaml 和命令行输入的配置文件
-│       └── checkpoints/       # 保存权重文件夹
+│       └── checkpoints/       # 保存权重文件夹（权重命名在 train.py 自行调整）
 ├── wandb/                     # 保存 wandb 数据文件夹
 ├── train.py                   # 训练脚本
 ├── test.py                    # 测试脚本
