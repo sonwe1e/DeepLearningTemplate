@@ -2,7 +2,6 @@
 
 本框架基于 PyTorch Lightning，专为图像分类任务设计，提供灵活的配置和实验管理功能。
 ## 最新更改
---
 - **[Jun 2025]** 添加推理示例代码和 ONNX 示例代码（推理代码支持单图预测和 val_dataloader 预测，具体的指标需要自己重新定义；ONNX 的导出和测试代码来源于 Pytorch 官方 tutorial）
 - **[Jun 2025]** 在 train.py、pl_tool.py 和 datasets.py 添加注释和引导
 - **[Jun 2025]** 添加模型注册机制（在 tools/models/test_model1.py 文件中定义自己的模型后，可以直接在 config.yaml 中导入并在 model_kwarg 添加模型的参数）
