@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 # 全局变量用于存储默认配置路径
-_DEFAULT_CONFIG_PATH = None
+_DEFAULT_CONFIG_PATH = "/media/hdd/sonwe1e/DeepLearningTemplate/configs/config.yaml"
 
 
 def set_default_config_path(path: str):

@@ -31,178 +31,199 @@
 - 其他计算机视觉任务
 """
 
-import torch
+import os
+import glob
 import numpy as np
+import tifffile
+from sklearn.model_selection import train_test_split
 from concurrent.futures import ThreadPoolExecutor
+import torch
+from torch.utils.data import Dataset
 from configs.option import get_option
-from .augments import train_transform, valid_transform
+
+# from .augments import train_transform, valid_transform
+train_transform = None
+valid_transform = None
 
 
-class Dataset(torch.utils.data.Dataset):
+class Dataset(Dataset):
     """
-    自定义数据集类
+    自定义数据集类，处理SAR、OPT和Label融合数据集
 
-    这个类继承自PyTorch的Dataset，负责管理训练和验证数据。
-    主要功能包括数据加载、预处理、标签处理等。
-
-    当前实现使用随机生成的模拟数据，实际使用时需要根据具体任务进行修改。
+    支持训练集、验证集和测试集的加载，其中：
+    - 训练集和验证集从train目录划分，提供SAR、OPT和Label
+    - 测试集从val目录加载，仅提供SAR和OPT
+    - 使用并行加载优化初始化性能
 
     Args:
-        phase (str): 数据集阶段，'train' 或 'valid'
-        opt: 配置对象，包含数据路径、批量大小等参数
-        train_transform: 训练时的数据增强变换
-        valid_transform: 验证时的数据增强变换
-
-    如何适配真实数据：
-    1. 修改 __init__ 中的 image_list，从实际路径加载文件列表
-    2. 实现 load_image 方法，加载真实图像文件
-    3. 修改 __getitem__ 中的标签加载逻辑
-    4. 根据任务调整返回的数据格式
+        phase (str): 数据集阶段，'train'、'valid' 或 'test'
+        opt: 配置对象，包含数据路径等参数
+        train_transform: 训练数据增强
+        valid_transform: 验证/测试数据增强
+        train_ratio (float): 训练集划分比例，默认为0.8
     """
 
-    def __init__(self, phase, opt, train_transform=None, valid_transform=None):
-        # ==================== 基础配置 ====================
-        self.phase = phase  # 训练或验证阶段
-        self.data_path = opt.data_path  # 数据路径，从配置文件读取
-
-        # ==================== 数据增强配置 ====================
-        # 根据阶段选择对应的数据变换：训练时使用增强，验证时使用基础变换
+    def __init__(
+        self, phase, opt, train_transform=None, valid_transform=None, train_ratio=0.8
+    ):
+        # 基础配置
+        self.phase = phase
+        self.data_path = opt.data_path
         self.transform = train_transform if phase == "train" else valid_transform
 
-        # ==================== 数据列表初始化 ====================
-        # TODO: 这里需要根据实际数据修改
-        # 当前使用模拟数据，实际应用时应该：
-        # 1. 从 self.data_path 读取图像文件列表
-        # 2. 根据标注文件加载对应的标签
-        # 3. 支持不同的数据组织方式（如 ImageNet 风格的目录结构）
-        self.image_list = [0] * 100  # 模拟100个样本
+        # 初始化数据列表
+        self.sar_paths = []
+        self.opt_paths = []
+        self.label_paths = []  # 仅用于train和valid
+        self.sar_mean = np.array([130.226])
+        self.sar_std = np.array([58.866])
+        self.opt_mean = np.array([68.901, 66.986, 59.681])
+        self.opt_std = np.array([58.509, 54.889, 53.997])
 
-        # 示例：实际数据加载代码
-        # import os
-        # import glob
-        # if phase == "train":
-        #     self.image_list = glob.glob(os.path.join(self.data_path, "train", "*.jpg"))
-        # else:
-        #     self.image_list = glob.glob(os.path.join(self.data_path, "valid", "*.jpg"))
+        # 获取train目录下所有文件名（以Label为基准，确保一致性）
+        if phase in ["train", "valid"]:
+            label_dir = os.path.join(self.data_path, "train", "0_Label")
+            label_files = sorted(glob.glob(os.path.join(label_dir, "*.tif")))
+            base_names = [
+                os.path.basename(f).replace("_Train.tif", "") for f in label_files
+            ]
+
+            # 构造对应的SAR和OPT路径
+            sar_dir = os.path.join(self.data_path, "train", "1_SAR")
+            opt_dir = os.path.join(self.data_path, "train", "2_Opt")
+            self.sar_paths = [
+                os.path.join(sar_dir, f"{name}_Train.tif") for name in base_names
+            ]
+            self.opt_paths = [
+                os.path.join(opt_dir, f"{name}_Train.tif") for name in base_names
+            ]
+            self.label_paths = label_files
+
+            # 划分训练集和验证集
+            indices = list(range(len(self.sar_paths)))
+            train_idx, valid_idx = train_test_split(
+                indices, train_size=train_ratio, random_state=42
+            )
+            if phase == "train":
+                self.sar_paths = [self.sar_paths[i] for i in train_idx]
+                self.opt_paths = [self.opt_paths[i] for i in train_idx]
+                self.label_paths = [self.label_paths[i] for i in train_idx]
+            else:  # valid
+                self.sar_paths = [self.sar_paths[i] for i in valid_idx]
+                self.opt_paths = [self.opt_paths[i] for i in valid_idx]
+                self.label_paths = [self.label_paths[i] for i in valid_idx]
+
+        elif phase == "test":
+            # 测试集从val目录加载，仅SAR和OPT
+            sar_dir = os.path.join(self.data_path, "val", "1_SAR")
+            sar_files = sorted(glob.glob(os.path.join(sar_dir, "*.tif")))
+            base_names = [
+                os.path.basename(f).replace("_Train.tif", "") for f in sar_files
+            ]
+            opt_dir = os.path.join(self.data_path, "val", "2_Opt")
+            self.sar_paths = sar_files
+            self.opt_paths = [
+                os.path.join(opt_dir, f"{name}_Train.tif") for name in base_names
+            ]
+
+        # 并行预加载图像（可选，视内存情况）
+        self.preloaded_images = None
+        if opt.preload_images:
+            self.load_images_in_parallel()
 
     def __getitem__(self, index):
         """
         获取单个数据样本
 
-        这是PyTorch Dataset的核心方法，负责返回指定索引的数据样本。
-        数据加载器会调用这个方法来获取训练或验证数据。
-
-        Args:
-            index (int): 样本索引，范围 [0, len(dataset))
-
         Returns:
-            dict: 包含 'image' 和 'label' 的字典
-                - image: 经过预处理的图像张量
-                - label: 对应的标签（分类任务为类别索引）
-
-        当前实现使用随机数据，实际使用时的修改示例：
-
-        # 分类任务示例：
-        # image_path = self.image_list[index]
-        # image = self.load_image(image_path)
-        # label = self.get_label_from_path(image_path)  # 从文件名或标注文件获取
-
-        # 分割任务示例：
-        # mask = self.load_mask(mask_path)
-        # label = mask  # 分割掩码作为标签
+            dict: 训练/验证返回 {"sar": tensor, "opt": tensor, "label": tensor}
+                  测试返回 {"sar": tensor, "opt": tensor}
         """
-        # ==================== 数据生成（模拟） ====================
-        # TODO: 替换为真实数据加载
-        # 生成随机图像：256x256 RGB图像
-        image = np.random.randint(0, 255, (256, 256, 3)).astype(np.uint8)
+        # 加载图像
+        if self.preloaded_images is not None:
+            sar = self.preloaded_images["sar"][index]
+            opt = self.preloaded_images["opt"][index]
+            label = (
+                self.preloaded_images["label"][index]
+                if self.phase in ["train", "valid"]
+                else None
+            )
+        else:
+            sar = self.load_image(self.sar_paths[index])
+            opt = self.load_image(self.opt_paths[index])
+            label = (
+                self.load_image(self.label_paths[index])
+                if self.phase in ["train", "valid"]
+                else None
+            )
 
-        # 生成固定标签（实际应用中应该从标注文件读取）
-        label = 1
-
-        # ==================== 数据增强应用 ====================
-        # 应用数据变换（增强、归一化等）
+        # 应用数据增强
         if self.transform is not None:
-            # 使用albumentations库进行数据增强
-            # augmented 字典包含变换后的图像和其他可能的输出
-            augmented = self.transform(image=image)
-            image = augmented["image"]
+            if self.phase in ["train", "valid"]:
+                augmented = self.transform(image=sar, image1=opt, mask=label)
+                sar, opt, label = (
+                    augmented["image"],
+                    augmented["image1"],
+                    augmented["mask"],
+                )
+            else:  # test
+                augmented = self.transform(image=sar, image1=opt)
+                sar, opt = augmented["image"], augmented["image1"]
 
-        # ==================== 返回格式 ====================
-        # 返回字典格式，便于扩展（如添加更多字段）
-        return {"image": image, "label": label}
+        # 转换为张量
+        sar = (sar - self.sar_mean) / self.sar_std  # 标准化SAR图像
+        opt = (opt - self.opt_mean) / self.opt_std  # 标准化OPT图像
+        sar = torch.from_numpy(sar).unsqueeze(0).float()
+        opt = torch.from_numpy(opt).permute(2, 0, 1).float()
+        result = {"sar": sar, "opt": opt}
+        if self.phase in ["train", "valid"]:
+            label = torch.from_numpy(label).long()  # 假设Label是分割掩码
+            result["label"] = label
+
+        return result
 
     def __len__(self):
-        """
-        返回数据集大小
-
-        PyTorch会调用这个方法来确定数据集的总样本数，
-        用于计算每个epoch的批次数量。
-
-        Returns:
-            int: 数据集中的样本总数
-        """
-        return len(self.image_list)
+        """返回数据集大小"""
+        return len(self.sar_paths)
 
     def load_image(self, path):
         """
         加载单个图像文件
 
-        这个方法负责从文件路径加载图像数据。
-        当前为空实现，需要根据实际数据格式进行修改。
-
         Args:
             path (str): 图像文件路径
 
         Returns:
-            numpy.ndarray: 加载的图像数组，格式通常为 (H, W, C)
-
-        实现示例：
-
-        # 使用PIL加载图像
-        # from PIL import Image
-        # image = Image.open(path).convert('RGB')
-        # return np.array(image)
-
-        # 使用OpenCV加载图像
-        # import cv2
-        # image = cv2.imread(path)
-        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        # return image
+            numpy.ndarray: 加载的图像数组 (H, W, C)
         """
-        # TODO: 实现真实的图像加载逻辑
-        return None
+        # 使用OpenCV加载.tif图像
+        image = tifffile.imread(path)
+        if image is None:
+            raise FileNotFoundError(f"无法加载图像: {path}")
+        return image
 
     def load_images_in_parallel(self):
         """
-        并行图像预加载优化方法
-
-        这个方法可以用于在数据集初始化时预加载图像，
-        利用多线程提升数据加载速度，特别适用于：
-        - 图像文件较小且数量较多的情况
-        - 需要减少训练时I/O等待的场景
-        - 内存充足的环境
-
-        使用建议：
-        - 根据可用内存调整预加载的图像数量
-        - 根据CPU核心数调整 max_workers 参数
-        - 考虑使用缓存机制避免重复加载
-
-        实现示例：
-
-        # def preload_images(self):
-        #     def load_single_image(path):
-        #         return self.load_image(path)
-        #
-        #     with ThreadPoolExecutor(max_workers=8) as executor:
-        #         self.preloaded_images = list(executor.map(
-        #             load_single_image, self.image_list[:1000]  # 预加载前1000张
-        #         ))
-        # 其实也可以直接叫 GPT 写
+        并行预加载图像以优化初始化性能
         """
-        # TODO: 实现并行图像加载逻辑
-        with ThreadPoolExecutor(max_workers=24):
-            # 这里可以实现具体的并行加载逻辑
-            pass
+
+        def load_single_image(path):
+            return self.load_image(path)
+
+        with ThreadPoolExecutor(max_workers=24) as executor:
+            sar_images = list(executor.map(load_single_image, self.sar_paths))
+            opt_images = list(executor.map(load_single_image, self.opt_paths))
+            label_images = (
+                list(executor.map(load_single_image, self.label_paths))
+                if self.phase in ["train", "valid"]
+                else []
+            )
+
+        self.preloaded_images = {
+            "sar": sar_images,
+            "opt": opt_images,
+            "label": label_images,
+        }
 
 
 def get_dataloader(opt):

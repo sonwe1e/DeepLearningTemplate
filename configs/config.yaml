@@ -15,6 +15,10 @@ log_step: 50
 # ===================================================================
 # 硬件资源
 devices:
+  - 0
+  - 1
+  - 2
+  - 4
   - 5
 num_workers: 16
 
@@ -26,20 +30,21 @@ prefetch_queue_size: 16 # DataLoader 预取队列，与 num_workers 配合
 # 数据管道 (Data Pipeline)
 # ===================================================================
 # 数据源与尺寸
-data_path: ""
-train_batch_size: 32
-valid_batch_size: 32
+data_path: "/media/hdd/sonwe1e/DeepLearningTemplate/dataset"
+train_batch_size: 4
+valid_batch_size: 4
 image_size: 384
+preload_images: false
 
 # ===================================================================
 # 模型定义 (Model Definition)
 # ===================================================================
 # 架构与初始化 - 现在可以直接使用 tools/models/ 目录下的模型类名
 model:
-  model_name: test_network
+  model_name: unet
   model_kwargs:
-    in_channels: 3
-    num_classes: 3
+    in_channels: 4
+    num_classes: 6
 
 # ===================================================================
 # 训练策略 (Training Strategy)

@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.traceback import install
 
 # richer traceback
-install(show_locals=True)
+# install(show_locals=True)
 
 
 class ModelRegistry:

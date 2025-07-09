@@ -174,36 +174,9 @@ class LightningModule(pl.LightningModule):
             self.model = model
 
         # ==================== 损失函数定义 ====================
-        # 交叉熵损失，适用于多分类任务
-        #
-        # 如何自定义损失函数：
-        # 1. 回归任务：self.loss1 = torch.nn.MSELoss() 或 torch.nn.L1Loss()
-        # 2. 二分类任务：self.loss1 = torch.nn.BCEWithLogitsLoss()
-        # 3. 多标签分类：self.loss1 = torch.nn.MultiLabelSoftMarginLoss()
-        # 4. 自定义损失：from tools.losses import FocalLoss; self.loss1 = FocalLoss()
-        # 5. 组合损失：可以定义多个损失函数并在训练中组合使用
-        #
-        # 示例：添加辅助损失
-        # self.loss1 = torch.nn.CrossEntropyLoss()  # 主要损失
-        # self.loss2 = torch.nn.MSELoss()           # 辅助损失（如特征重建）
         self.loss1 = torch.nn.CrossEntropyLoss()
 
         # ==================== EMA配置 ====================
-        # 指数移动平均配置，用于提升模型性能
-        #
-        # EMA参数调整指南：
-        # - use_ema: 是否启用EMA，建议在稳定训练后启用
-        # - ema_decay: 衰减系数，影响平滑程度
-        #   * 0.99: 较快更新，适合小模型或快速实验
-        #   * 0.999: 标准设置，适合大多数情况
-        #   * 0.9999: 极慢更新，适合大模型或长期训练
-        #
-        # 何时使用EMA：
-        # - 模型参数震荡较大时
-        # - 需要更稳定的验证性能时
-        # - 生产环境部署时（使用EMA权重）
-        #
-        # 禁用EMA：在配置文件中设置 use_ema: false
         self.use_ema = getattr(opt, "use_ema", True)  # 是否使用EMA
         self.ema_decay = getattr(opt, "ema_decay", 0.999)  # EMA衰减系数
         if self.use_ema:
@@ -219,7 +192,7 @@ class LightningModule(pl.LightningModule):
             self.ema = EMA(self.model, decay=self.ema_decay)
             self.ema_initialized = True
 
-    def forward(self, x):
+    def forward(self, sar, opt):
         """
         模型前向传播
 
@@ -229,7 +202,7 @@ class LightningModule(pl.LightningModule):
         Returns:
             pred: 模型预测输出，通常是分类logits
         """
-        pred = self.model(x)
+        pred = self.model(sar, opt)
         return pred
 
     def configure_optimizers(self):
@@ -341,10 +314,10 @@ class LightningModule(pl.LightningModule):
             self._init_ema()
 
         # 解析批次数据
-        image, label = (batch["image"], batch["label"])
+        sar, opt, label = (batch["sar"], batch["opt"], batch["label"])
 
         # 前向传播：获取模型预测
-        prediction = self(image)
+        prediction = self(sar, opt)
 
         # 计算交叉熵损失
         ce_loss = self.loss1(prediction, label)
@@ -380,10 +353,10 @@ class LightningModule(pl.LightningModule):
             batch_idx: 当前批次的索引
         """
         # 解析批次数据
-        image, label = (batch["image"], batch["label"])
+        sar, opt, label = (batch["sar"], batch["opt"], batch["label"])
 
         # 前向传播：使用EMA参数进行推理
-        prediction = self(image)
+        prediction = self(sar, opt)
 
         # 计算交叉熵损失
         ce_loss = self.loss1(prediction, label)

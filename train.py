@@ -68,7 +68,7 @@ if __name__ == "__main__":
     # - 复制 configs/config.yaml 创建新的配置文件
     # - 修改路径指向新的配置文件
     # - 例如：set_default_config_path("./my_custom_config.yaml")
-    set_default_config_path("/media/hdd/sonwe1e/Template/configs/config.yaml")
+    set_default_config_path("./configs/config.yaml")
 
     # 加载训练配置和选项，同时获取检查点保存路径
     # opt: 包含所有训练参数的配置对象

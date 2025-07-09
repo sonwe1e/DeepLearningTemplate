@@ -1,3 +1,5 @@
 **/wandb
 **/checkpoints
 **/__pycache__
+**/*.tif
+**/*.zip
