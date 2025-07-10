@@ -2,7 +2,6 @@
 
 import torch
 import lightning.pytorch as pl
-from .model_registry import get_model
 
 torch.set_float32_matmul_precision("high")
 
@@ -57,14 +56,7 @@ class LightningModule(pl.LightningModule):
         self.opt = opt
         self.learning_rate = opt.learning_rate
         self.dataset_len = dataset_len
-
-        if model is None:
-            model_kwargs = getattr(opt, "model_kwargs", {})
-            model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
-            self.model = get_model(opt.model_name, **model_kwargs)
-            print(f"动态加载模型: {opt.model_name}")
-        else:
-            self.model = model
+        self.model = model
 
         self.loss1 = torch.nn.CrossEntropyLoss()
 

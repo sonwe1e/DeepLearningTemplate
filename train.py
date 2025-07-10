@@ -14,7 +14,7 @@ torch.set_float32_matmul_precision("high")
 
 
 def main():
-    set_default_config_path("/media/hdd/sonwe1e/Template/configs/config.yaml")
+    set_default_config_path("./configs/config.yaml")
     opt, checkpoint_path = get_option()
 
     pl.seed_everything(opt.seed)
