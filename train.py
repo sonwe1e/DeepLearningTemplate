@@ -5,7 +5,6 @@ import lightning.pytorch as pl
 from lightning.pytorch.loggers import WandbLogger
 import wandb
 import os
-
 from configs.option import get_option, set_default_config_path
 from tools.model_registry import get_model, list_available_models
 from tools.pl_tool import LightningModule
