@@ -4,26 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.layers import LayerNorm2d
 import timm
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 # ======================================================================================
-# 1. Core Building Blocks & Modules
+# 1. Core Building Blocks & Modules (保持不变)
 # ======================================================================================
 
 
 class SelectiveFeatureFusion(nn.Module):
     """
     通过动态通道注意力机制，自适应地融合多个并行的特征分支。
-
-    该模块借鉴了 "Selective Kernel Networks" 的思想，但将其应用于融合来自不同
-    计算分支（例如，不同卷积核大小的输出）的特征图，而非单个卷积内的多尺度核。
-
-    工作流程:
-    1. 将所有输入分支的特征图在通道维度上求和。
-    2. 对求和后的特征进行全局平均池化，得到每个通道的全局上下文描述符 [B, C, 1, 1]。
-    3. 使用一个 1D 卷积（作为轻量级全连接层）处理通道描述符，生成每个分支的注意力权重。
-    4. 应用 Softmax 使权重归一化。
-    5. 将归一化的注意力权重应用到原始的输入分支上，进行加权求和。
     """
 
     def __init__(self, in_channels: int, num_branches: int, kernel_size: int = 3):
@@ -31,74 +21,41 @@ class SelectiveFeatureFusion(nn.Module):
         self.num_branches = num_branches
         self.in_channels = in_channels
 
-        # 全局平均池化，用于捕获每个通道的全局信息
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        # 使用1D卷积作为高效的MLP，学习各分支间的非线性关系以生成注意力权重
-        # 输入维度为1（代表求和后的特征），输出维度为分支数
         self.attention_generator = nn.Conv1d(
             1, num_branches, kernel_size, padding=kernel_size // 2
         )
-
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, feature_branches: List[torch.Tensor]) -> torch.Tensor:
-        # 验证输入分支数量是否正确
         if len(feature_branches) != self.num_branches:
             raise ValueError(
                 f"Expected {self.num_branches} feature branches, but got {len(feature_branches)}"
             )
 
         B, C, H, W = feature_branches[0].shape
-
-        # 将输入分支列表堆叠成一个新的维度 [B, N, C, H, W]，N是分支数
         stacked_features = torch.stack(feature_branches, dim=1)
-
-        # 1. 将所有分支的特征逐元素相加，以聚合所有分支的信息
-        # [B, N, C, H, W] -> [B, C, H, W]
         fused_features = torch.sum(stacked_features, dim=1)
-
-        # 2. 全局平均池化，提取通道级上下文信息
-        # [B, C, H, W] -> [B, C, 1, 1]
         pooled_features = self.global_avg_pool(fused_features)
-
-        # 3. 准备输入1D卷积：[B, C, 1, 1] -> [B, C, 1] -> [B, 1, C]
-        # 1D卷积期望输入格式为 (Batch, Channels, Length)
         attention_input = pooled_features.squeeze(-1).permute(0, 2, 1)
-
-        # 4. 生成注意力向量：[B, 1, C] -> [B, N, C]
         attention_scores = self.attention_generator(attention_input)
-
-        # 5. 调整维度并应用Softmax进行归一化
-        # [B, N, C] -> [B, N, C, 1, 1]
-        # 这个形状是为了能与 [B, N, C, H, W] 的 stacked_features 进行广播乘法
         attention_weights = self.softmax(attention_scores).unsqueeze(-1).unsqueeze(-1)
-
-        # 6. 将注意力权重应用到原始分支上，并加权求和得到最终输出
-        # ( [B, N, C, H, W] * [B, N, C, 1, 1] ) -> [B, N, C, H, W]
-        # -> sum over N -> [B, C, H, W]
         output = torch.sum(stacked_features * attention_weights, dim=1)
-
         return output
 
 
 class MultiScaleConvHead(nn.Module):
     """
     一个多尺度卷积头，用于并行提取不同感受野的特征，并使用注意力机制进行融合。
-
-    它包含多个并行的卷积分支（具有不同的kernel_size），一个注意力融合模块，
-    以及一个最终的投影层，用于整合所有信息。
     """
 
     def __init__(self, in_channels: int, num_classes: int):
         super().__init__()
         self.in_channels = in_channels
 
-        # 定义不同尺度的卷积核大小
         kernel_sizes = [1, 3, 5, 7]
         self.num_branches = len(kernel_sizes)
 
-        # 使用 ModuleList 来优雅地管理多个并行的卷积分支
         self.conv_branches = nn.ModuleList(
             [
                 nn.Conv2d(in_channels, in_channels, kernel_size=k, padding=k // 2)
@@ -106,42 +63,27 @@ class MultiScaleConvHead(nn.Module):
             ]
         )
 
-        # 使用我们的注意力模块来融合多尺度特征
         self.attention_fusion = SelectiveFeatureFusion(
             in_channels=in_channels,
             num_branches=self.num_branches,
-            kernel_size=7,  # 保持与原设计一致
+            kernel_size=7,
         )
 
-        # 最终的投影层，将原始多尺度特征和融合后的特征进行整合
-        # 输入通道数 = 4个分支 + 1个融合后的特征 = 5 * in_channels
         self.projection_conv = nn.Conv2d(
             in_channels * (self.num_branches + 1), num_classes, kernel_size=7, padding=3
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 1. 并行通过多个卷积分支，得到多尺度特征
         multi_scale_features = [conv(x) for conv in self.conv_branches]
-
-        # 2. 使用注意力机制融合多尺度特征
         fused_feature = self.attention_fusion(multi_scale_features)
-
-        # 3. 将所有原始分支和融合后的特征在通道维度上拼接
         all_features = torch.cat(multi_scale_features + [fused_feature], dim=1)
-
-        # 4. 通过投影层得到最终输出
         output = self.projection_conv(all_features)
-
         return output
 
 
 class DualPathConvBlock(nn.Module):
     """
     一个具有两个并行卷积路径和残差连接的自定义卷积块。
-    这种结构可能用于捕获更丰富的特征表示。
-
-    - Path 1: Depthwise-like -> Pointwise expansion -> Pointwise projection
-    - Path 2: Pointwise expansion -> Depthwise-like -> Pointwise projection
     """
 
     def __init__(
@@ -155,25 +97,21 @@ class DualPathConvBlock(nn.Module):
         self.has_residual = in_channels == out_channels
         hidden_channels = int(in_channels * expand_ratio)
 
-        # 第一个并行路径
         self.path1 = nn.Sequential(
             nn.Conv2d(
                 in_channels, in_channels, kernel_size=7, padding=3, groups=in_channels
-            ),  # 深度卷积
+            ),
             LayerNorm2d(in_channels),
             nn.Dropout(dropout_rate / 2),
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),  # 1x1 卷积扩展通道
+            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
             nn.GELU(),
             nn.Dropout(dropout_rate),
-            nn.Conv2d(
-                hidden_channels, out_channels, kernel_size=1
-            ),  # 1x1 卷积投影回输出通道
+            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
         )
 
-        # 第二个并行路径
         self.path2 = nn.Sequential(
             nn.Dropout(dropout_rate / 2),
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),  # 1x1 卷积扩展通道
+            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
             nn.GELU(),
             nn.Conv2d(
                 hidden_channels,
@@ -181,18 +119,15 @@ class DualPathConvBlock(nn.Module):
                 kernel_size=7,
                 padding=3,
                 groups=hidden_channels,
-            ),  # 深度卷积
+            ),
             LayerNorm2d(hidden_channels),
             nn.Dropout(dropout_rate),
-            nn.Conv2d(
-                hidden_channels, out_channels, kernel_size=1
-            ),  # 1x1 卷积投影回输出通道
+            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
         )
 
         self._init_weights()
 
     def _init_weights(self):
-        # 将权重初始化逻辑封装在一个私有方法中，保持__init__的整洁
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.trunc_normal_(m.weight, std=0.06)
@@ -207,19 +142,122 @@ class DualPathConvBlock(nn.Module):
 
 
 # ======================================================================================
-# 2. Main Architecture: Encoder-Decoder
+# 2. Feature Fusion Module
+# ======================================================================================
+
+
+class CrossModalFeatureFusion(nn.Module):
+    """
+    跨模态特征融合模块，用于融合SAR和OPT的特征。
+    支持多种融合策略：add, concat, attention
+    """
+
+    def __init__(self, channels: int, fusion_type: str = "attention"):
+        super().__init__()
+        self.fusion_type = fusion_type
+        self.channels = channels
+
+        if fusion_type == "attention":
+            # 使用注意力机制进行融合
+            self.attention_fusion = SelectiveFeatureFusion(
+                in_channels=channels, num_branches=2, kernel_size=3
+            )
+        elif fusion_type == "concat":
+            # 拼接后降维
+            self.fusion_conv = nn.Conv2d(
+                channels * 2, channels, kernel_size=1, bias=False
+            )
+            self.norm = LayerNorm2d(channels)
+        # "add" 模式不需要额外参数
+
+    def forward(self, sar_feat: torch.Tensor, opt_feat: torch.Tensor) -> torch.Tensor:
+        if self.fusion_type == "add":
+            return sar_feat + opt_feat
+        elif self.fusion_type == "concat":
+            fused = torch.cat([sar_feat, opt_feat], dim=1)
+            fused = self.fusion_conv(fused)
+            return self.norm(fused)
+        elif self.fusion_type == "attention":
+            return self.attention_fusion([sar_feat, opt_feat])
+        else:
+            raise ValueError(f"Unknown fusion type: {self.fusion_type}")
+
+
+# ======================================================================================
+# 3. Dual-Stream Encoder
+# ======================================================================================
+
+
+class DualStreamEncoder(nn.Module):
+    """
+    双流编码器，为SAR和OPT数据提供独立的编码路径。
+    在每个层级进行特征融合，然后传递给下一层。
+    """
+
+    def __init__(
+        self,
+        model_config: str,
+        encoder_channels: List[int],
+        fusion_type: str = "attention",
+        pretrained: bool = True,
+    ):
+        super().__init__()
+
+        # 创建SAR编码器 (3通道输入)
+        self.sar_encoder = timm.create_model(
+            model_config, pretrained=pretrained, features_only=True, in_chans=3
+        )
+
+        # 创建OPT编码器 (3通道输入，但会复制1通道到3通道)
+        self.opt_encoder = timm.create_model(
+            model_config, pretrained=pretrained, features_only=True, in_chans=3
+        )
+
+        # 创建每个层级的特征融合模块
+        self.fusion_modules = nn.ModuleList(
+            [
+                CrossModalFeatureFusion(channels, fusion_type)
+                for channels in encoder_channels
+            ]
+        )
+
+        self.encoder_channels = encoder_channels
+
+    def forward(self, sar: torch.Tensor, opt: torch.Tensor) -> List[torch.Tensor]:
+        """
+        Args:
+            sar: SAR数据 [B, 3, H, W]
+            opt: OPT数据 [B, 1, H, W]
+
+        Returns:
+            List of fused features from each encoder stage
+        """
+        # 将OPT的单通道复制为3通道
+        opt_3ch = opt.repeat(1, 3, 1, 1)  # [B, 1, H, W] -> [B, 3, H, W]
+
+        # 分别通过两个编码器
+        sar_features = self.sar_encoder(sar)
+        opt_features = self.opt_encoder(opt_3ch)
+
+        # 在每个层级进行特征融合
+        fused_features = []
+        for i, (sar_feat, opt_feat, fusion_module) in enumerate(
+            zip(sar_features, opt_features, self.fusion_modules)
+        ):
+            fused_feat = fusion_module(sar_feat, opt_feat)
+            fused_features.append(fused_feat)
+
+        return fused_features
+
+
+# ======================================================================================
+# 4. Modified UNet Decoder
 # ======================================================================================
 
 
 class UNetDecoder(nn.Module):
     """
-    一个标准的U-Net解码器。
-
-    它接收来自编码器不同阶段的特征图列表（skip connections），从最深的特征开始，
-    逐步上采样并与对应的编码器特征融合，以恢复空间分辨率和细节。
-
-    注意: 原始代码中的卷积块被注释掉了。此处的实现遵循了原始代码的简化逻辑，
-    即仅进行上采样和特征融合。如果需要更强的解码能力，可以在融合后添加卷积块。
+    标准的U-Net解码器，接收融合后的特征进行解码。
     """
 
     def __init__(
@@ -236,15 +274,12 @@ class UNetDecoder(nn.Module):
             )
         self.fusion_mode = fusion_mode
 
-        # 反转编码器通道列表，以便从深到浅进行处理
         encoder_channels = encoder_channels[::-1]
 
         self.upsample_layers = nn.ModuleList()
-        # 如果是 'concat' 模式，还需要额外的卷积来调整通道数
         self.fusion_convs = nn.ModuleList() if fusion_mode == "concat" else None
 
         for i in range(len(decoder_channels)):
-            # 上采样层：将前一阶段的特征图尺寸翻倍
             up_conv = nn.ConvTranspose2d(
                 in_channels=encoder_channels[i],
                 out_channels=decoder_channels[i],
@@ -253,7 +288,6 @@ class UNetDecoder(nn.Module):
             )
             self.upsample_layers.append(up_conv)
 
-            # 在 'concat' 模式下，通道数会增加，需要一个卷积层来处理融合后的特征
             if fusion_mode == "concat":
                 fusion_in_channels = decoder_channels[i] + encoder_channels[i + 1]
                 fusion_out_channels = decoder_channels[i]
@@ -267,52 +301,40 @@ class UNetDecoder(nn.Module):
                     )
                 )
 
-        # 最终的分割头，将解码器最浅层的特征映射到类别数
-        # 注意: 原始代码输出 `num_classes + 1`，这通常意味着包含一个背景类。我们保留此逻辑。
         self.segmentation_head = nn.Sequential(
             nn.Dropout(0.2), MultiScaleConvHead(decoder_channels[-1], num_classes)
         )
 
-    def forward(self, encoder_features: List[torch.Tensor]) -> torch.Tensor:
-        # 从最深的编码器特征开始
+    def forward(
+        self, encoder_features: List[torch.Tensor]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         x = encoder_features[-1]
-
-        # 反转编码器特征列表（跳跃连接），以便从深到浅地访问
         skip_connections = encoder_features[::-1][1:]
 
         for i in range(len(self.upsample_layers)):
-            # 1. 上采样
             x = self.upsample_layers[i](x)
-
-            # 2. 获取对应的跳跃连接特征
             skip = skip_connections[i]
 
-            # 3. 进行特征融合
             if self.fusion_mode == "concat":
                 x = torch.cat([x, skip], dim=1)
-                x = self.fusion_convs[i](x)  # 应用卷积调整通道
+                x = self.fusion_convs[i](x)
             elif self.fusion_mode == "add":
-                # 'add' 模式要求上采样后的通道数与跳跃连接的通道数一致
                 x = x + skip
 
-            # TODO: 可以在此处添加更复杂的卷积块（如DualPathConvBlock）以增强解码能力。
-            # x = self.conv_blocks[i](x)
-
-        # 应用最终的分割头
         output = self.segmentation_head(x)
-        return output, x  # 返回logits和最后一层特征
+        return output, x
 
 
-class TimmUnet(nn.Module):
+# ======================================================================================
+# 5. Main Architecture: Dual-Stream U-Net
+# ======================================================================================
+
+
+class DualStreamTimmUnet(nn.Module):
     """
-    一个基于 `timm` 预训练模型的 U-Net 架构。
-
-    使用 `timm` 库提供的强大模型作为编码器，并连接一个自定义的 U-Net 解码器
-    来进行像素级预测任务（如语义分割）。
+    双流U-Net架构，分别处理SAR和OPT数据，在编码器的每个层级进行特征融合。
     """
 
-    # 预定义 `timm` 模型及其各阶段输出的通道数，便于管理
-    # 这是一个务实但较脆弱的设计。更鲁棒的方案是动态探测模型，但会增加复杂性。
     MODEL_CHANNELS_MAP: Dict[str, List[int]] = {
         "rdnet_large.nv_in1k_ft_in1k_384": [528, 840, 1528, 2000],
         "efficientvit_l3.r384_in1k": [128, 256, 512, 1024],
@@ -325,32 +347,30 @@ class TimmUnet(nn.Module):
         self,
         model_config: str,
         num_classes: int,
-        fusion_mode: str = "add",
+        fusion_mode: str = "add",  # 解码器的融合模式
+        cross_modal_fusion: str = "attention",  # 跨模态融合模式
         pretrained: bool = True,
-        drop_path_rate: float = 0.2,
     ):
         super().__init__()
 
         if model_config not in self.MODEL_CHANNELS_MAP:
             raise KeyError(
-                f"Model '{model_config}' not found in MODEL_CHANNELS_MAP. Please add its channel configuration."
+                f"Model '{model_config}' not found in MODEL_CHANNELS_MAP. "
+                f"Please add its channel configuration."
             )
-
-        # 1. 创建编码器
-        self.encoder = timm.create_model(
-            model_config,
-            pretrained=pretrained,
-            features_only=True,
-            # drop_path_rate=drop_path_rate,
-        )
 
         encoder_channels = self.MODEL_CHANNELS_MAP[model_config]
 
-        # 2. 创建解码器
-        # 解码器通道数通常是编码器通道数的逆序，并去掉最深层（因为它作为解码器输入）
-        # 例如: encoder=[64, 128, 256, 512] -> decoder_channels=[256, 128, 64]
-        decoder_channels = encoder_channels[::-1][1:]
+        # 1. 创建双流编码器
+        self.encoder = DualStreamEncoder(
+            model_config=model_config,
+            encoder_channels=encoder_channels,
+            fusion_type=cross_modal_fusion,
+            pretrained=pretrained,
+        )
 
+        # 2. 创建解码器
+        decoder_channels = encoder_channels[::-1][1:]
         self.decoder = UNetDecoder(
             encoder_channels=encoder_channels,
             decoder_channels=decoder_channels,
@@ -358,16 +378,24 @@ class TimmUnet(nn.Module):
             fusion_mode=fusion_mode,
         )
 
-    def forward(self, sar: torch.Tensor, opt: torch.Tensor) -> torch.Tensor:
-        # 记录原始输入尺寸，用于最后上采样
-        x = sar + opt  # 假设 sar 和 opt 是两个通道的输入
-        input_size = x.shape[2:]
+        self.model_config = model_config
 
-        # 1. 编码器前向传播，获取多尺度特征图
-        encoder_features = self.encoder(x)
+    def forward(self, opt: torch.Tensor, sar: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            sar: SAR数据 [B, 3, H, W]
+            opt: OPT数据 [B, 1, H, W]
 
-        # 2. 解码器前向传播，得到分割图的 logits
-        logits, last_feature = self.decoder(encoder_features)
+        Returns:
+            logits: 分割预测 [B, num_classes, H, W]
+        """
+        input_size = sar.shape[2:]
+
+        # 1. 双流编码器前向传播，获取融合后的多尺度特征图
+        fused_features = self.encoder(sar, opt)
+
+        # 2. 解码器前向传播，得到分割图的logits
+        logits, last_feature = self.decoder(fused_features)
 
         # 3. 将输出上采样到原始输入尺寸
         logits = F.interpolate(
@@ -378,8 +406,7 @@ class TimmUnet(nn.Module):
 
     def load_from_checkpoint(self, checkpoint_path: str):
         """
-        一个健壮的加载权重的辅助函数。
-        它能处理 state_dict 中键名可能带有的 'model.' 前缀。
+        加载预训练权重的辅助函数。
         """
         print(f"Loading weights from: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -388,41 +415,63 @@ class TimmUnet(nn.Module):
         # 移除 'model.' 前缀（如果存在）
         clean_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
-        self.load_state_dict(clean_state_dict)
+        self.load_state_dict(
+            clean_state_dict, strict=False
+        )  # strict=False for partial loading
         print("Weights loaded successfully.")
+
+    def load_encoder_weights_separately(self, sar_checkpoint: str, opt_checkpoint: str):
+        """
+        分别加载SAR和OPT编码器的预训练权重。
+        """
+        print(f"Loading SAR encoder weights from: {sar_checkpoint}")
+        sar_state = torch.load(sar_checkpoint, map_location="cpu")
+        sar_state_dict = sar_state.get("state_dict", sar_state)
+
+        print(f"Loading OPT encoder weights from: {opt_checkpoint}")
+        opt_state = torch.load(opt_checkpoint, map_location="cpu")
+        opt_state_dict = opt_state.get("state_dict", opt_state)
+
+        # 加载到对应的编码器中
+        self.encoder.sar_encoder.load_state_dict(sar_state_dict, strict=False)
+        self.encoder.opt_encoder.load_state_dict(opt_state_dict, strict=False)
+
+        print("Encoder weights loaded successfully.")
 
 
 # ======================================================================================
-# 3. Execution Example
+# 6. Execution Example
 # ======================================================================================
 
 if __name__ == "__main__":
     # --- 设定参数 ---
-    MODEL_config = "rdnet_small.nv_in1k"
-    NUM_CLASSES = 1  # 例如，二分类分割（前景 vs 背景）
-    FUSION_MODE = "add"
+    MODEL_CONFIG = "rdnet_small.nv_in1k"
+    NUM_CLASSES = 1  # 二分类分割
+    FUSION_MODE = "add"  # 解码器融合模式
+    CROSS_MODAL_FUSION = "attention"  # 跨模态融合模式
     BATCH_SIZE = 2
-    IMAGE_SIZE = (1088, 1088)
+    IMAGE_SIZE = (512, 512)  # 使用较小尺寸进行测试
 
     # --- 创建模型实例 ---
-    # 使用了更具描述性的类名 TimmUnet
-    model = TimmUnet(
-        model_config=MODEL_config,
+    model = DualStreamTimmUnet(
+        model_config=MODEL_CONFIG,
         num_classes=NUM_CLASSES,
         fusion_mode=FUSION_MODE,
-        pretrained=False,  # 在测试时不下载预训练权重
+        cross_modal_fusion=CROSS_MODAL_FUSION,
+        pretrained=True,  # 在测试时不下载预训练权重
     )
 
-    # --- 创建一个随机输入张量 ---
-    # 遵循非数据假设原则，这里仅为形状测试
-    dummy_input = torch.randn(BATCH_SIZE, 3, *IMAGE_SIZE)
+    # --- 创建模拟输入张量 ---
+    sar_input = torch.randn(BATCH_SIZE, 1, *IMAGE_SIZE)  # SAR: 3通道
+    opt_input = torch.randn(BATCH_SIZE, 3, *IMAGE_SIZE)  # OPT: 1通道
 
     # --- 模型前向传播 ---
-    print(f"Input shape: {dummy_input.shape}")
+    print(f"SAR input shape: {sar_input.shape}")
+    print(f"OPT input shape: {opt_input.shape}")
+
     try:
-        logits, final_features = model(dummy_input)
+        logits = model(sar_input, opt_input)
         print(f"Output logits shape: {logits.shape}")
-        print(f"Output feature shape: {final_features.shape}")
 
         # --- 验证输出形状 ---
         expected_shape = (BATCH_SIZE, NUM_CLASSES, *IMAGE_SIZE)
@@ -430,10 +479,18 @@ if __name__ == "__main__":
             f"Shape mismatch! Expected {expected_shape}, but got {logits.shape}"
         )
 
-        print("\nModel forward pass successful and output shape is correct.")
+        print(
+            "\nDual-stream model forward pass successful and output shape is correct."
+        )
+
+        # --- 打印模型参数统计 ---
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"\nTotal parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
 
     except Exception as e:
         print(f"\nAn error occurred during model forward pass: {e}")
-        # 打印模型结构以帮助调试
-        # print("\nModel Architecture:")
-        # print(model)
+        import traceback
+
+        traceback.print_exc()

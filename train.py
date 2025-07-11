@@ -1,53 +1,3 @@
-"""
-深度学习模型训练主程序
-
-这个文件是整个项目的训练入口点，主要功能包括：
-1. 配置管理：加载训练配置和超参数
-2. 模型初始化：根据配置创建指定的深度学习模型
-3. 数据准备：设置训练和验证数据加载器
-4. 训练流程：使用PyTorch Lightning进行模型训练
-5. 实验跟踪：集成Wandb进行训练过程监控和日志记录
-6. 模型保存：自动保存最佳检查点
-
-使用方法：
-    python train.py
-
-注意：
-- 确保配置文件 configs/config.yaml 存在且配置正确
-- 训练数据路径在配置文件中正确设置
-- 根据硬件情况调整批次大小和设备配置
-
-=== 如何自定义训练 ===
-
-1. 修改配置文件 (configs/config.yaml):
-   - 调整学习率、批次大小、训练轮数等超参数
-   - 设置数据路径和模型保存路径
-   - 配置模型类型和参数
-
-2. 添加新模型:
-   - 在 tools/models/ 目录下创建新的模型文件
-   - 在 tools/model_registry.py 中注册新模型
-   - 在配置文件中指定新模型名称
-
-3. 自定义数据集:
-   - 修改 tools/datasets/datasets.py 中的Dataset类
-   - 实现真实数据的加载逻辑
-   - 调整数据增强策略
-
-4. 添加新的损失函数:
-   - 在 tools/pl_tool.py 的LightningModule中修改loss计算
-   - 或在 tools/losses.py 中定义新的损失函数
-
-5. 自定义训练回调:
-   - 添加学习率调度、早停等回调函数
-   - 在trainer的callbacks列表中添加新的回调
-
-6. 调试和监控:
-   - 检查wandb日志了解训练进度
-   - 调整验证频率和日志记录频率
-   - 使用检查点恢复中断的训练
-"""
-
 import torch
 from configs.option import get_option, set_default_config_path
 import os
@@ -56,73 +6,76 @@ from lightning.pytorch.loggers import WandbLogger
 from tools.pl_tool import LightningModule
 import wandb
 
-# 设置PyTorch矩阵乘法精度为高精度模式，可以提升在某些硬件上的性能
 torch.set_float32_matmul_precision("high")
 
 if __name__ == "__main__":
-    # ==================== 配置初始化 ====================
-    # 设置默认配置文件路径，后续所有 get_option() 调用都会使用这个路径
-    # 这样可以避免每次调用时都需要传递配置文件路径
-    #
-    # 自定义配置文件：
-    # - 复制 configs/config.yaml 创建新的配置文件
-    # - 修改路径指向新的配置文件
-    # - 例如：set_default_config_path("./my_custom_config.yaml")
     set_default_config_path("./configs/config.yaml")
 
-    # 加载训练配置和选项，同时获取检查点保存路径
-    # opt: 包含所有训练参数的配置对象
-    # checkpoint_path: 模型检查点的保存路径
-    #
-    # 配置对象包含的主要参数：
-    # - opt.learning_rate: 学习率
-    # - opt.epochs: 训练轮数
-    # - opt.train_batch_size / opt.valid_batch_size: 批次大小
-    # - opt.model: 模型配置字典
-    # - opt.data_path: 数据路径
-    # - opt.devices: 使用的GPU数量
     opt, checkpoint_path = get_option()
 
-    # ==================== 模块导入 ====================
-    # 导入数据集相关模块 - 现在它们会使用上面设置的配置路径
-    # 注意：这里使用通配符导入是为了动态加载数据集类
-    #
-    # 如何添加自定义数据集：
-    # 1. 在 tools/datasets/ 目录下创建新的数据集文件
-    # 2. 实现自定义的Dataset类，继承torch.utils.data.Dataset
-    # 3. 在 datasets.py 中导入并注册新的数据集类
-    # 4. 修改 get_dataloader 函数来使用新的数据集
     from tools.datasets.datasets import *
     from tools.model_registry import list_available_models, get_model
 
-    # ==================== 随机种子设置 ====================
-    # 设置全局随机种子，确保实验结果的可重现性
-    # 这会影响PyTorch、NumPy、Python等的随机数生成
-
     pl.seed_everything(opt.seed)
 
-    # ==================== 模型选择与初始化 ====================
-    # 打印所有可用的模型列表，方便用户了解可选择的模型
-    #
-    # 如何添加新模型：
-    # 1. 在 tools/models/ 目录下创建新的模型文件（如 my_model.py）
-    # 2. 在配置文件中设置 model.model_name 为新模型名称
-    # 3. 配置 model.model_kwargs 中的模型参数
     print("可用模型列表:")
     for model_name in list_available_models():
         print(f"  - {model_name}")
 
-    # 根据配置文件中的设置创建指定的深度学习模型
-    # model_name: 模型的名称
-    # model_kwargs: 模型的具体参数
-    #
-    # 配置示例（在config.yaml中）：
-    # model:
-    #   model_name: "ResNet"
+    model = get_model(opt.model["model_name"], **opt.model["model_kwargs"])
+    #  model.load_from_checkpoint(
+    #      "/media/hdd/sonwe1e/DeepLearningTemplate/experiments/baselinev1_2025-07-09_20-17-28/checkpoints/epoch_49-loss_0.386.ckpt"
+    #  )
+
+    train_dataloader, valid_dataloader = get_dataloader(opt)
+
+    wandb_logger = WandbLogger(
+        project=opt.project,
+        name=opt.exp_name,
+        offline=not opt.save_wandb,
+        config=opt,
+    )
+
+    trainer = pl.Trainer(
+        accelerator="auto",
+        devices=opt.devices,
+        strategy="auto",
+        max_epochs=opt.epochs,
+        precision=opt.precision,
+        default_root_dir="./",
+        logger=wandb_logger,
+        val_check_interval=opt.val_check,
+        log_every_n_steps=opt.log_step,
+        accumulate_grad_batches=opt.accumulate_grad_batches,
+        gradient_clip_val=opt.gradient_clip_val,
+        callbacks=[
+            pl.callbacks.ModelCheckpoint(
+                dirpath=os.path.join(checkpoint_path, "./checkpoints"),
+                monitor=f"metrics/{opt.save_metric}",
+                mode="max",
+                save_top_k=opt.save_checkpoint_num,
+                save_last=False,
+                filename="epoch_{epoch}-mIoU_{metrics/val_miou:.3f}",
+                auto_insert_metric_name=False,
+            )
+        ],
+    )
+
+    trainer.fit(
+        LightningModule(opt, model, len(train_dataloader)),
+        train_dataloaders=train_dataloader,
+        val_dataloaders=valid_dataloader,
+        ckpt_path=opt.resume,
+    )
+
+    wandb.finish()
     #   model_kwargs:
     #     num_classes: 10
     #     layers: [2, 2, 2, 2]
     model = get_model(opt.model["model_name"], **opt.model["model_kwargs"])
+    #  model.load_from_checkpoint(
+    #      "/media/hdd/sonwe1e/DeepLearningTemplate/experiments/large_pre.ckpt"
+    #  )  # 加载预训练模型配置
 
     # 可选：模型编译优化（当前被注释掉）
     # 在某些情况下可以提升训练速度，但可能增加内存使用

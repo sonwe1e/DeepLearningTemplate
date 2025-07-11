@@ -35,6 +35,7 @@ import os
 import glob
 import numpy as np
 import tifffile
+import cv2
 from sklearn.model_selection import train_test_split
 from concurrent.futures import ThreadPoolExecutor
 import torch
@@ -64,7 +65,7 @@ class Dataset(Dataset):
     """
 
     def __init__(
-        self, phase, opt, train_transform=None, valid_transform=None, train_ratio=0.8
+        self, phase, opt, train_transform=None, valid_transform=None, train_ratio=0.92
     ):
         # 基础配置
         self.phase = phase
@@ -118,12 +119,12 @@ class Dataset(Dataset):
             sar_dir = os.path.join(self.data_path, "val", "1_SAR")
             sar_files = sorted(glob.glob(os.path.join(sar_dir, "*.tif")))
             base_names = [
-                os.path.basename(f).replace("_Train.tif", "") for f in sar_files
+                os.path.basename(f).replace("_Val.tif", "") for f in sar_files
             ]
             opt_dir = os.path.join(self.data_path, "val", "2_Opt")
             self.sar_paths = sar_files
             self.opt_paths = [
-                os.path.join(opt_dir, f"{name}_Train.tif") for name in base_names
+                os.path.join(opt_dir, f"{name}_Val.tif") for name in base_names
             ]
 
         # 并行预加载图像（可选，视内存情况）
@@ -173,12 +174,79 @@ class Dataset(Dataset):
         # 转换为张量
         sar = (sar - self.sar_mean) / self.sar_std  # 标准化SAR图像
         opt = (opt - self.opt_mean) / self.opt_std  # 标准化OPT图像
-        sar = torch.from_numpy(sar).unsqueeze(0).float()
-        opt = torch.from_numpy(opt).permute(2, 0, 1).float()
+        # 数据增强逻辑，应用于训练阶段
+        if self.phase == "train":
+            # 随机旋转 (0°, 90°, 180°, 270°)
+            rotation = np.random.choice([0, 1, 2, 3])
+            sar = np.rot90(sar, rotation, axes=(0, 1))
+            opt = np.rot90(opt, rotation, axes=(0, 1))
+
+            # 随机水平翻转
+            flip_horizontal = np.random.random() > 0.5
+            if flip_horizontal:
+                sar = np.fliplr(sar)
+                opt = np.fliplr(opt)
+
+            # 随机垂直翻转
+            flip_vertical = np.random.random() > 0.5
+            if flip_vertical:
+                sar = np.flipud(sar)
+                opt = np.flipud(opt)
+
+            # 随机仿射变换（缩放和平移）
+            # 为什么选择仿射变换：通过缩放和平移增加数据多样性，模拟视角变化，同时保持图像内容的几何一致性
+            # 权衡：避免过于剧烈的变换以防止标签失真
+            affine = np.random.random() > 0.5
+            if affine:  # 50% 概率应用仿射变换
+                height, width = sar.shape[:2]
+                # 定义仿射变换参数
+                scale = np.random.uniform(0.7, 1.3)  # 随机缩放因子 (80% 到 120%)
+                tx = np.random.uniform(-0.2 * width, 0.2 * width)  # 水平平移
+                ty = np.random.uniform(-0.2 * height, 0.2 * height)  # 垂直平移
+
+                # 构建仿射变换矩阵
+                # 矩阵形式：[[s*cosθ, -s*sinθ, tx], [s*sinθ, s*cosθ, ty]]，这里仅考虑缩放和平移，旋转已在上一步处理
+                affine_matrix = np.float32([[scale, 0, tx], [0, scale, ty]])
+
+                # 应用仿射变换，使用线性插值以保持图像质量
+                sar = cv2.warpAffine(
+                    sar,
+                    affine_matrix,
+                    (width, height),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REFLECT,
+                )
+                opt = cv2.warpAffine(
+                    opt,
+                    affine_matrix,
+                    (width, height),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REFLECT,
+                )
+
+            # 如果有标签，应用相同的变换
+            if label is not None:
+                label = np.rot90(label, rotation, axes=(0, 1))
+                if flip_horizontal:
+                    label = np.fliplr(label)
+                if flip_vertical:
+                    label = np.flipud(label)
+                if affine:  # 确保与图像相同的仿射变换概率
+                    label = cv2.warpAffine(
+                        label,
+                        affine_matrix,
+                        (width, height),
+                        flags=cv2.INTER_NEAREST,
+                        borderMode=cv2.BORDER_REFLECT,
+                    )
+        sar = torch.from_numpy(sar.copy()).unsqueeze(0).float()
+        opt = torch.from_numpy(opt.copy()).permute(2, 0, 1).float()
+
         result = {"sar": sar, "opt": opt}
         if self.phase in ["train", "valid"]:
-            label = torch.from_numpy(label).long()  # 假设Label是分割掩码
+            label = torch.from_numpy(label.copy()).long()  # 假设Label是分割掩码
             result["label"] = label
+        result["name"] = os.path.basename(self.sar_paths[index])
 
         return result
 
