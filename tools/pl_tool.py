@@ -2,7 +2,7 @@ import torch
 import lightning.pytorch as pl
 from .model_registry import get_model
 import torch.nn.functional as F
-from tools.losses import DiceLoss
+from tools.losses import DiceLoss, IdentityLoss, LovaszSoftmax, FocalLoss
 
 torch.set_float32_matmul_precision("high")
 
@@ -45,22 +45,15 @@ class LightningModule(pl.LightningModule):
     def __init__(self, opt, model, len_trainloader):
         super().__init__()
         self.learning_rate = opt.learning_rate
+        self.layer_decay = opt.layer_decay
         self.len_trainloader = len_trainloader
         self.opt = opt
 
-        if model is None:
-            model_kwargs = {
-                "input_channels": getattr(opt, "in_chans", 3),
-                "num_classes": getattr(opt, "num_classes", 10),
-            }
-            model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
-            self.model = get_model(opt.model_name, **model_kwargs)
-            print(f"动态加载模型: {opt.model_name}")
-        else:
-            self.model = model
+        self.model = model
 
         self.loss1 = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
         self.loss2 = DiceLoss()
+        self.loss3 = LovaszSoftmax()
 
         self.use_ema = getattr(opt, "use_ema", True)
         self.ema_decay = getattr(opt, "ema_decay", 0.999)
@@ -84,15 +77,33 @@ class LightningModule(pl.LightningModule):
         return pred
 
     def configure_optimizers(self):
-        self.optimizer = torch.optim.AdamW(
-            self.parameters(),
-            weight_decay=self.opt.weight_decay,
-            lr=self.learning_rate,
-        )
+        if self.layer_decay <= 0.0 or self.layer_decay >= 1.0:
+            # 如果没有使用层级学习率衰减，使用原来的优化器配置
+            self.optimizer = torch.optim.AdamW(
+                self.parameters(),
+                weight_decay=self.opt.weight_decay,
+                lr=self.learning_rate,
+            )
+        else:
+            # 使用层级学习率衰减
+            param_groups = self._get_layer_wise_lr_param_groups()
+            self.optimizer = torch.optim.AdamW(
+                param_groups,
+                weight_decay=self.opt.weight_decay,
+            )
+
+        # 获取实际的步数，考虑多卡并行训练
+        if hasattr(self.trainer, "world_size") and self.trainer.world_size > 1:
+            total_steps = (
+                self.len_trainloader // self.trainer.world_size
+            ) * self.opt.epochs
+        else:
+            total_steps = self.len_trainloader * self.opt.epochs
+
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=self.learning_rate,
-            total_steps=self.len_trainloader * self.opt.epochs,
+            total_steps=total_steps,
             pct_start=self.opt.pct_start,
         )
         return {
@@ -102,6 +113,81 @@ class LightningModule(pl.LightningModule):
                 "interval": "step",
             },
         }
+
+    def _get_layer_wise_lr_param_groups(self):
+        """
+        按照层次划分参数组，并应用层级学习率衰减
+        """
+        # 基于模型类型判断层次，这里以典型的backbone+decoder为例
+        param_groups = []
+
+        # 如果是类似DualStreamTimmUnet的模型，可以分层次应用衰减
+        if hasattr(self.model, "encoder") and hasattr(self.model, "decoder"):
+            # 1. 分离backbone参数（encoder）
+            encoder_layers = []
+            if hasattr(self.model.encoder, "sar_encoder") and hasattr(
+                self.model.encoder.sar_encoder, "stages"
+            ):
+                # 将encoder分为不同阶段
+                for i, stage in enumerate(self.model.encoder.sar_encoder.stages):
+                    decay = self.layer_decay ** (
+                        len(self.model.encoder.sar_encoder.stages) - i
+                    )
+                    encoder_layers.append(
+                        {
+                            "params": stage.parameters(),
+                            "lr": self.learning_rate * decay,
+                            "name": f"sar_encoder_stage_{i}",
+                        }
+                    )
+
+            if hasattr(self.model.encoder, "opt_encoder") and hasattr(
+                self.model.encoder.opt_encoder, "stages"
+            ):
+                for i, stage in enumerate(self.model.encoder.opt_encoder.stages):
+                    decay = self.layer_decay ** (
+                        len(self.model.encoder.opt_encoder.stages) - i
+                    )
+                    encoder_layers.append(
+                        {
+                            "params": stage.parameters(),
+                            "lr": self.learning_rate * decay,
+                            "name": f"opt_encoder_stage_{i}",
+                        }
+                    )
+
+            # 2. 融合模块参数
+            if hasattr(self.model.encoder, "fusion_modules"):
+                param_groups.append(
+                    {
+                        "params": self.model.encoder.fusion_modules.parameters(),
+                        "lr": self.learning_rate,
+                        "name": "fusion_modules",
+                    }
+                )
+
+            # 3. 解码器参数（通常使用更高的学习率）
+            param_groups.append(
+                {
+                    "params": self.model.decoder.parameters(),
+                    "lr": self.learning_rate,
+                    "name": "decoder",
+                }
+            )
+
+            # 添加encoder层参数组
+            param_groups.extend(encoder_layers)
+        else:
+            # 默认情况下，对整个模型使用相同的学习率
+            param_groups.append(
+                {
+                    "params": self.model.parameters(),
+                    "lr": self.learning_rate,
+                    "name": "whole_model",
+                }
+            )
+
+        return param_groups
 
     def _calculate_miou(self, pred, target, num_classes):
         pred = torch.argmax(pred, dim=1)
@@ -128,15 +214,17 @@ class LightningModule(pl.LightningModule):
         prediction = self(sar, opt)
         ce_loss = self.loss1(prediction, label)
         dice_loss = self.loss2(prediction, label)
-        loss = ce_loss + dice_loss
+        lovasz_loss = self.loss3(prediction, label)
+        loss = ce_loss + 5 * dice_loss + lovasz_loss
 
         ious = self._calculate_miou(prediction, label, self.num_classes)
         self.train_iou_sum += ious
         self.train_iou_count += 1
 
         self.log("loss/train_ce_loss", ce_loss)
-        self.log("loss/train_loss", loss)
+        self.log("loss/train_lovasz_loss", lovasz_loss)
         self.log("loss/train_dice_loss", dice_loss)
+        self.log("loss/train_loss", loss, prog_bar=True)
         self.log("trainer/learning_rate", self.optimizer.param_groups[0]["lr"])
         if self.use_ema:
             self.ema.update()
@@ -147,14 +235,16 @@ class LightningModule(pl.LightningModule):
         prediction = self(sar, opt)
         ce_loss = self.loss1(prediction, label)
         dice_loss = self.loss2(prediction, label)
-        loss = ce_loss + dice_loss
+        lovasz_loss = self.loss3(prediction, label)
+        loss = ce_loss + dice_loss + lovasz_loss
 
         ious = self._calculate_miou(prediction, label, self.num_classes)
         self.val_iou_sum += ious
         self.val_iou_count += 1
 
-        self.log("loss/valid_ce_loss", ce_loss, prog_bar=True)
-        self.log("loss/valid_dice_loss", dice_loss, prog_bar=True)
+        self.log("loss/valid_ce_loss", ce_loss)
+        self.log("loss/valid_dice_loss", dice_loss)
+        self.log("loss/valid_lovasz_loss", lovasz_loss)
         self.log("loss/valid_loss", loss)
 
     def on_validation_start(self):

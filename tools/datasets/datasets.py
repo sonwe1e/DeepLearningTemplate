@@ -1,36 +1,3 @@
-"""
-数据集模块 - 深度学习训练数据管理
-
-这个文件负责处理训练和验证数据的加载、预处理和批量管理，主要功能包括：
-
-1. 数据集类定义 (Dataset):
-   - 负责单个样本的加载和预处理
-   - 支持训练和验证两种模式
-   - 集成数据增强流水线
-   - 支持并行数据加载优化
-
-2. 数据加载器创建 (get_dataloader):
-   - 创建训练和验证数据加载器
-   - 配置批量大小、洗牌、多进程等参数
-   - 优化GPU内存使用
-
-当前实现：
-- 使用随机生成的模拟数据进行测试
-- 提供了完整的数据加载框架
-- 可以通过修改 __getitem__ 方法适配真实数据
-
-如何适配真实数据：
-1. 修改 __init__ 方法：更新 image_list 为真实的文件路径列表
-2. 修改 load_image 方法：实现图像文件的实际加载逻辑
-3. 修改 __getitem__ 方法：加载真实图像和标签
-4. 调整数据增强：根据任务需求修改 augments.py
-
-支持的任务类型：
-- 图像分类
-- 语义分割（需要修改标签加载）
-- 其他计算机视觉任务
-"""
-
 import os
 import glob
 import numpy as np
@@ -41,10 +8,145 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 from torch.utils.data import Dataset
 from configs.option import get_option
+from scipy.ndimage import gaussian_filter
+import albumentations as A
 
 # from .augments import train_transform, valid_transform
 train_transform = None
 valid_transform = None
+
+
+def augment_color_brightness_contrast(image: np.ndarray) -> np.ndarray:
+    """
+    对图像应用色彩、亮度和对比度的复合增强。
+    使用 albumentations 库进行高效、标准化的实现。
+
+    Args:
+        image (np.ndarray): 输入图像，格式为 HWC, uint8, 0-255 BGR。
+                            (注意：albumentations 内部处理颜色空间，输入输出保持一致)
+
+    Returns:
+        np.ndarray: 增强后的图像，格式为 HWC, uint8, 0-255 BGR。
+    """
+    transform = A.Compose(
+        [
+            A.ColorJitter(
+                hue=[-0.1, 0.1],
+                p=0.5,
+            ),
+        ]
+    )
+
+    # 应用变换并返回结果图像
+    augmented_image = transform(image=image)["image"]
+    return augmented_image
+
+
+def add_random_patch(image: np.ndarray, probability: float = 0.8) -> np.ndarray:
+    """
+    Randomly adds a patch to the image with various textures (solid, gaussian, uniform).
+    The patch has an irregular, organic shape.
+
+    Args:
+        image (np.ndarray): The input image as a NumPy array. Assumed to be in [0, 255] range.
+        probability (float): The probability of applying this augmentation.
+
+    Returns:
+        np.ndarray: The augmented image or the original image if augmentation was not applied.
+    """
+    # 深拷贝输入图像，避免对原始数据进行意外修改。这是一个良好的编程实践。
+    opt = image.copy()
+
+    # 概率检查与阶段判断：确保此数据增强仅在训练阶段按指定概率触发。
+    if np.random.random() >= probability:
+        return opt
+
+    h, w = opt.shape[:2]
+
+    # === 1. 定义色块的几何属性 (位置、尺寸、形状) ===
+    # 核心思想：通过随机化参数，确保每次生成的色块都独一无二。
+
+    # 尺寸：在图像尺寸的一定比例范围内随机选择，避免过大或过小。
+    patch_w = np.random.randint(int(0.1 * w), int(0.7 * w))
+    patch_h = np.random.randint(int(0.1 * h), int(0.7 * h))
+
+    # 位置：在保证色块完整位于图像内的前提下，随机选择左上角坐标。
+    x1 = np.random.randint(0, w - patch_w + 1)
+    y1 = np.random.randint(0, h - patch_h + 1)
+
+    # === 2. 生成色块内容 (从三种类型中随机选择) ===
+    # 核心思想：模拟不同类型的图像伪影或遮挡，增加模型的鲁棒性。
+    patch_type = np.random.choice(["solid", "gaussian"])
+
+    patch_content = np.zeros((patch_h, patch_w), dtype=np.float32)
+
+    if patch_type == "solid":
+        # 纯色块：模拟完全遮挡或标签。限制在灰度色，因为彩色会引入过强的先验。
+        # 随机选择黑、灰、白三种基本颜色。
+        color_value = np.random.choice([0, 125, 160, 195, 225, 255])
+        patch_content.fill(color_value)
+
+    elif patch_type == "gaussian":
+        # 高斯噪声块：模拟更自然的污渍或纹理。
+        # 1. 生成标准正态分布噪声。
+        noise = np.random.randn(patch_h, patch_w)
+        # 2. 通过高斯滤波使其平滑，产生连续、自然的纹理。sigma与尺寸关联，确保尺度适应性。
+        noise = gaussian_filter(noise, sigma=min(patch_h, patch_w) * 0.1)
+        # 3. 归一化到 [0, 1] 区间。
+        #    为防止(max-min)为0的除零错误，增加一个极小值epsilon。
+        min_val, max_val = noise.min(), noise.max()
+        if max_val > min_val:
+            noise = (noise - min_val) / (max_val - min_val)
+        # 4. 映射到 [0, 255] 的像素值范围。
+        patch_content = noise * 255
+
+    # === 3. 创建不规则形状的软化掩码 (Alpha Channel) ===
+    # 核心思想：避免硬边缘。使用一个平滑衰减的椭圆，并用噪声扰动其边界，以生成自然、不规则的形状。
+
+    yy, xx = np.ogrid[:patch_h, :patch_w]
+    center_y, center_x = patch_h / 2, patch_w / 2
+
+    # 椭圆参数：随机化长短轴，增加形状的多样性。
+    a = patch_h * np.random.uniform(0.3, 0.5)
+    b = patch_w * np.random.uniform(0.35, 0.6)
+
+    # 边界扰动噪声：用低频噪声对椭圆的距离场进行扰动。
+    boundary_noise = gaussian_filter(
+        np.random.random((patch_h, patch_w)), sigma=min(patch_h, patch_w) * 0.05
+    )
+
+    # 距离场：计算每个点到中心的归一化椭圆距离。
+    distance_from_center = np.sqrt(
+        ((yy - center_y) ** 2) / a**2 + ((xx - center_x) ** 2) / b**2
+    )
+
+    # 创建软化掩码：距离越远，透明度越高。噪声的加入使边界不规则。
+    # np.clip确保alpha值在[0, 1]之间。
+    soft_mask = np.clip(1.2 - distance_from_center - 0.5 * boundary_noise, 0, 1)
+
+    # === 4. Alpha混合 ===
+    # 核心思想：使用物理上正确的Alpha混合公式，将色块自然地叠加到原图上。
+    # Result = alpha * Foreground + (1 - alpha) * Background
+
+    # 最终的alpha通道，可以再乘以一个全局透明度因子增加随机性。
+    alpha = soft_mask * np.random.uniform(0.7, 1.0)
+
+    # 确保alpha和色块内容与原图通道数匹配，以便进行广播运算。
+    if len(opt.shape) == 3:
+        ch = opt.shape[2]
+        patch_content = np.repeat(patch_content[:, :, np.newaxis], ch, axis=2)
+        alpha = np.repeat(alpha[:, :, np.newaxis], ch, axis=2)
+
+    # 提取目标区域，并转换为浮点数进行精确计算。
+    original_region = opt[y1 : y1 + patch_h, x1 : x1 + patch_w].astype(np.float32)
+
+    # 执行Alpha混合公式。
+    blended = alpha * patch_content + (1 - alpha) * original_region
+
+    # 将混合后的结果写回原图，并转换回原始数据类型。
+    opt[y1 : y1 + patch_h, x1 : x1 + patch_w] = blended.astype(opt.dtype)
+
+    return opt
 
 
 class Dataset(Dataset):
@@ -159,86 +261,76 @@ class Dataset(Dataset):
             )
 
         # 应用数据增强
-        if self.transform is not None:
-            if self.phase in ["train", "valid"]:
-                augmented = self.transform(image=sar, image1=opt, mask=label)
-                sar, opt, label = (
-                    augmented["image"],
-                    augmented["image1"],
-                    augmented["mask"],
-                )
-            else:  # test
-                augmented = self.transform(image=sar, image1=opt)
-                sar, opt = augmented["image"], augmented["image1"]
 
+        if self.phase == "train":
+            opt = add_random_patch(opt, probability=0.25)  # 添加随机补丁
+            opt = augment_color_brightness_contrast(opt)  # 色彩增强
         # 转换为张量
         sar = (sar - self.sar_mean) / self.sar_std  # 标准化SAR图像
         opt = (opt - self.opt_mean) / self.opt_std  # 标准化OPT图像
+
         # 数据增强逻辑，应用于训练阶段
         if self.phase == "train":
-            # 随机旋转 (0°, 90°, 180°, 270°)
-            rotation = np.random.choice([0, 1, 2, 3])
-            sar = np.rot90(sar, rotation, axes=(0, 1))
-            opt = np.rot90(opt, rotation, axes=(0, 1))
-
             # 随机水平翻转
             flip_horizontal = np.random.random() > 0.5
             if flip_horizontal:
                 sar = np.fliplr(sar)
                 opt = np.fliplr(opt)
+                if label is not None:
+                    label = np.fliplr(label)
 
             # 随机垂直翻转
             flip_vertical = np.random.random() > 0.5
             if flip_vertical:
                 sar = np.flipud(sar)
                 opt = np.flipud(opt)
+                if label is not None:
+                    label = np.flipud(label)
 
-            # 随机仿射变换（缩放和平移）
-            # 为什么选择仿射变换：通过缩放和平移增加数据多样性，模拟视角变化，同时保持图像内容的几何一致性
-            # 权衡：避免过于剧烈的变换以防止标签失真
-            affine = np.random.random() > 0.5
-            if affine:  # 50% 概率应用仿射变换
+            # 综合仿射变换（旋转、缩放和平移）
+            affine = np.random.random() > 0.3  # 增加应用变换的概率为70%
+            if affine:
                 height, width = sar.shape[:2]
+                center = (width // 2, height // 2)  # 旋转中心
+
                 # 定义仿射变换参数
-                scale = np.random.uniform(0.7, 1.3)  # 随机缩放因子 (80% 到 120%)
-                tx = np.random.uniform(-0.2 * width, 0.2 * width)  # 水平平移
-                ty = np.random.uniform(-0.2 * height, 0.2 * height)  # 垂直平移
+                angle = np.random.uniform(-90, 90)  # 随机旋转角度，范围 -45° 到 45°
+                scale = np.random.uniform(0.8, 1.2)  # 随机缩放因子
+                tx = np.random.uniform(-0.15 * width, 0.15 * width)  # 水平平移
+                ty = np.random.uniform(-0.15 * height, 0.15 * height)  # 垂直平移
 
-                # 构建仿射变换矩阵
-                # 矩阵形式：[[s*cosθ, -s*sinθ, tx], [s*sinθ, s*cosθ, ty]]，这里仅考虑缩放和平移，旋转已在上一步处理
-                affine_matrix = np.float32([[scale, 0, tx], [0, scale, ty]])
+                # 创建旋转+缩放矩阵
+                rotation_matrix = cv2.getRotationMatrix2D(center, angle, scale)
 
-                # 应用仿射变换，使用线性插值以保持图像质量
+                # 添加平移部分
+                rotation_matrix[0, 2] += tx
+                rotation_matrix[1, 2] += ty
+
+                # 应用仿射变换
                 sar = cv2.warpAffine(
                     sar,
-                    affine_matrix,
+                    rotation_matrix,
                     (width, height),
                     flags=cv2.INTER_LINEAR,
                     borderMode=cv2.BORDER_REFLECT,
                 )
                 opt = cv2.warpAffine(
                     opt,
-                    affine_matrix,
+                    rotation_matrix,
                     (width, height),
                     flags=cv2.INTER_LINEAR,
                     borderMode=cv2.BORDER_REFLECT,
                 )
 
-            # 如果有标签，应用相同的变换
-            if label is not None:
-                label = np.rot90(label, rotation, axes=(0, 1))
-                if flip_horizontal:
-                    label = np.fliplr(label)
-                if flip_vertical:
-                    label = np.flipud(label)
-                if affine:  # 确保与图像相同的仿射变换概率
+                if label is not None:
                     label = cv2.warpAffine(
                         label,
-                        affine_matrix,
+                        rotation_matrix,
                         (width, height),
-                        flags=cv2.INTER_NEAREST,
+                        flags=cv2.INTER_NEAREST,  # 对标签使用最近邻插值
                         borderMode=cv2.BORDER_REFLECT,
                     )
+
         sar = torch.from_numpy(sar.copy()).unsqueeze(0).float()
         opt = torch.from_numpy(opt.copy()).permute(2, 0, 1).float()
 
@@ -376,19 +468,19 @@ def get_dataloader(opt):
 if __name__ == "__main__":
     """
     数据集测试代码
-    
+
     这个部分用于测试数据加载器是否正常工作，
     可以单独运行这个文件来验证数据流水线。
-    
+
     测试内容：
     1. 创建数据加载器
     2. 加载第一个批次
     3. 打印图像尺寸和标签信息
     4. 验证数据格式是否正确
-    
+
     运行方式：
     python -m tools.datasets.datasets
-    
+
     或者直接：
     python tools/datasets/datasets.py
     """
@@ -418,4 +510,5 @@ if __name__ == "__main__":
         print(f"图像数值范围: [{batch['image'].min():.3f}, {batch['image'].max():.3f}]")
         break  # 只测试第一个批次
 
+    print("\n数据加载器测试完成！")
     print("\n数据加载器测试完成！")

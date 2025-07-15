@@ -101,7 +101,10 @@ def get_option(
         exp_path.mkdir(parents=True, exist_ok=True)
 
         # --- 6. 将最终有效配置保存到新目录 ---
-        # 这是关键的修改：写入到新的、本次运行专属的配置文件中
+        # 在保存前移除 config 键，这样保存的 YAML 文件中不会包含原始配置文件路径
+        if "config" in final_config:
+            del final_config["config"]
+
         effective_config_path = exp_path / "save_config.yaml"
         with open(effective_config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(final_config, f, allow_unicode=True, sort_keys=False)

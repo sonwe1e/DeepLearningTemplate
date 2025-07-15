@@ -81,66 +81,6 @@ class MultiScaleConvHead(nn.Module):
         return output
 
 
-class DualPathConvBlock(nn.Module):
-    """
-    一个具有两个并行卷积路径和残差连接的自定义卷积块。
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        expand_ratio: int = 4,
-        dropout_rate: float = 0.3,
-    ):
-        super().__init__()
-        self.has_residual = in_channels == out_channels
-        hidden_channels = int(in_channels * expand_ratio)
-
-        self.path1 = nn.Sequential(
-            nn.Conv2d(
-                in_channels, in_channels, kernel_size=7, padding=3, groups=in_channels
-            ),
-            LayerNorm2d(in_channels),
-            nn.Dropout(dropout_rate / 2),
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
-            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
-        )
-
-        self.path2 = nn.Sequential(
-            nn.Dropout(dropout_rate / 2),
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
-            nn.GELU(),
-            nn.Conv2d(
-                hidden_channels,
-                hidden_channels,
-                kernel_size=7,
-                padding=3,
-                groups=hidden_channels,
-            ),
-            LayerNorm2d(hidden_channels),
-            nn.Dropout(dropout_rate),
-            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
-        )
-
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.trunc_normal_(m.weight, std=0.06)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output = self.path1(x) + self.path2(x)
-        if self.has_residual:
-            output += x
-        return output
-
-
 # ======================================================================================
 # 2. Feature Fusion Module
 # ======================================================================================
@@ -205,12 +145,18 @@ class DualStreamEncoder(nn.Module):
 
         # 创建SAR编码器 (3通道输入)
         self.sar_encoder = timm.create_model(
-            model_config, pretrained=pretrained, features_only=True, in_chans=3
+            model_config,
+            pretrained=pretrained,
+            features_only=True,
+            in_chans=3,
         )
 
         # 创建OPT编码器 (3通道输入，但会复制1通道到3通道)
         self.opt_encoder = timm.create_model(
-            model_config, pretrained=pretrained, features_only=True, in_chans=3
+            model_config,
+            pretrained=pretrained,
+            features_only=True,
+            in_chans=3,
         )
 
         # 创建每个层级的特征融合模块
@@ -302,7 +248,12 @@ class UNetDecoder(nn.Module):
                 )
 
         self.segmentation_head = nn.Sequential(
-            nn.Dropout(0.2), MultiScaleConvHead(decoder_channels[-1], num_classes)
+            nn.Dropout(0.2),
+            MultiScaleConvHead(decoder_channels[-1], num_classes),
+            # nn.Conv2d(decoder_channels[-1], decoder_channels[-1], kernel_size=1),
+            # nn.Conv2d(decoder_channels[-1], decoder_channels[-1], 3, 1, 1),
+            # nn.Dropout(0.2),
+            # nn.Conv2d(decoder_channels[-1], num_classes, kernel_size=1),
         )
 
     def forward(
@@ -341,6 +292,8 @@ class DualStreamTimmUnet(nn.Module):
         "rdnet_base.nv_in1k": [408, 584, 1000, 1760],
         "rdnet_small.nv_in1k": [264, 512, 760, 1264],
         "rdnet_tiny.nv_in1k": [256, 440, 744, 1040],
+        "convnext_xlarge.fb_in22k_ft_in1k_384": [256, 512, 1024, 2048],
+        "convnext_nano.r384_in12k": [80, 160, 320, 640],
     }
 
     def __init__(
@@ -415,9 +368,7 @@ class DualStreamTimmUnet(nn.Module):
         # 移除 'model.' 前缀（如果存在）
         clean_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
-        self.load_state_dict(
-            clean_state_dict, strict=False
-        )  # strict=False for partial loading
+        self.load_state_dict(clean_state_dict, strict=False)
         print("Weights loaded successfully.")
 
     def load_encoder_weights_separately(self, sar_checkpoint: str, opt_checkpoint: str):
@@ -445,7 +396,7 @@ class DualStreamTimmUnet(nn.Module):
 
 if __name__ == "__main__":
     # --- 设定参数 ---
-    MODEL_CONFIG = "rdnet_small.nv_in1k"
+    MODEL_CONFIG = "efficientvit_l3.r384_in1k"
     NUM_CLASSES = 1  # 二分类分割
     FUSION_MODE = "add"  # 解码器融合模式
     CROSS_MODAL_FUSION = "attention"  # 跨模态融合模式
