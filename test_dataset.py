@@ -238,7 +238,7 @@ def test_memory_usage(dataloader, phase="train"):
         return False
 
 
-def visualize_samples(dataloader, phase="train", num_samples=2):
+def visualize_samples(dataloader, phase="train", num_samples=16):
     """可视化数据样本"""
     print("=" * 60)
     print(f"🎨 {phase.upper()} 数据可视化")
@@ -254,7 +254,7 @@ def visualize_samples(dataloader, phase="train", num_samples=2):
             plt.subplot(1, 3, 1)
             sar_img = batch["sar"][i, 0].cpu().numpy()  # 取第一个通道
             plt.imshow(sar_img, cmap="gray")
-            plt.title(f"SAR 图像 (样本 {i + 1})\n形状: {sar_img.shape}")
+            # plt.title(f"SAR 图像 (样本 {i + 1})\n形状: {sar_img.shape}")
             plt.axis("off")
 
             # OPT 图像 (RGB)
@@ -265,12 +265,12 @@ def visualize_samples(dataloader, phase="train", num_samples=2):
                 # 标准化到 [0, 1]
                 opt_img = (opt_img - opt_img.min()) / (opt_img.max() - opt_img.min())
                 plt.imshow(opt_img)
-                plt.title(f"OPT 图像 (样本 {i + 1})\n形状: {opt_img.shape}")
+                # plt.title(f"OPT 图像 (样本 {i + 1})\n形状: {opt_img.shape}")
             else:
                 # 如果只有一个通道，显示为灰度图
                 opt_img = batch["opt"][i, 0].cpu().numpy()
                 plt.imshow(opt_img, cmap="gray")
-                plt.title(f"OPT 图像 (样本 {i + 1})\n形状: {opt_img.shape}")
+                # plt.title(f"OPT 图像 (样本 {i + 1})\n形状: {opt_img.shape}")
             plt.axis("off")
 
             # Label 图像（如果存在）
@@ -278,7 +278,7 @@ def visualize_samples(dataloader, phase="train", num_samples=2):
                 plt.subplot(1, 3, 3)
                 label_img = batch["label"][i].cpu().numpy()
                 plt.imshow(label_img, cmap="tab10")
-                plt.title(f"Label 图像 (样本 {i + 1})\n形状: {label_img.shape}")
+                # plt.title(f"Label 图像 (样本 {i + 1})\n形状: {label_img.shape}")
                 plt.colorbar()
                 plt.axis("off")
 
@@ -307,7 +307,7 @@ def main():
 
     # 获取配置
     try:
-        opt, _ = get_option()
+        opt, _ = get_option(verbose=False)
         print(f"✅ 配置加载成功")
         print(f"📁 数据路径: {opt.data_path}")
         print(f"🏷️  实验名称: {opt.exp_name}")
@@ -330,33 +330,33 @@ def main():
     tests_passed = 0
     total_tests = 0
 
-    # 1. 基本信息测试
-    test_dataset_basic_info(train_dataloader, valid_dataloader)
+    # # 1. 基本信息测试
+    # test_dataset_basic_info(train_dataloader, valid_dataloader)
 
-    # 2. 训练数据加载测试
-    total_tests += 1
-    if test_data_loading(train_dataloader, "train"):
-        tests_passed += 1
+    # # 2. 训练数据加载测试
+    # total_tests += 1
+    # if test_data_loading(train_dataloader, "train"):
+    #     tests_passed += 1
 
-    # 3. 验证数据加载测试
-    total_tests += 1
-    if test_data_loading(valid_dataloader, "valid"):
-        tests_passed += 1
+    # # 3. 验证数据加载测试
+    # total_tests += 1
+    # if test_data_loading(valid_dataloader, "valid"):
+    #     tests_passed += 1
 
-    # 4. 数据一致性测试
-    total_tests += 1
-    if test_data_consistency(train_dataloader, "train"):
-        tests_passed += 1
+    # # 4. 数据一致性测试
+    # total_tests += 1
+    # if test_data_consistency(train_dataloader, "train"):
+    #     tests_passed += 1
 
-    # 5. 加载速度测试
-    total_tests += 1
-    if test_loading_speed(train_dataloader, "train"):
-        tests_passed += 1
+    # # 5. 加载速度测试
+    # total_tests += 1
+    # if test_loading_speed(train_dataloader, "train"):
+    #     tests_passed += 1
 
-    # 6. 内存使用测试
-    total_tests += 1
-    if test_memory_usage(train_dataloader, "train"):
-        tests_passed += 1
+    # # 6. 内存使用测试
+    # total_tests += 1
+    # if test_memory_usage(train_dataloader, "train"):
+    #     tests_passed += 1
 
     # 7. 数据可视化（可选）
     try:

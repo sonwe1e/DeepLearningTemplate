@@ -3,3 +3,5 @@
 **/__pycache__
 **/*.tif
 **/*.zip
+**/*.png
+**/*save_config.yaml

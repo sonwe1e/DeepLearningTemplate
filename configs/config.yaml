@@ -3,7 +3,7 @@
 # ===================================================================
 # 核心标识符与可复现性设置
 project: Test
-exp_name: baselinev1
+exp_name: convnext-focalloss-newrecipe-jitter_bc
 seed: 42
 
 # 日志与监控
@@ -15,10 +15,6 @@ log_step: 50
 # ===================================================================
 # 硬件资源
 devices:
-  - 0
-  - 1
-  - 2
-  - 4
   - 5
 num_workers: 16
 
@@ -31,9 +27,8 @@ prefetch_queue_size: 16 # DataLoader 预取队列，与 num_workers 配合
 # ===================================================================
 # 数据源与尺寸
 data_path: "/media/hdd/sonwe1e/DeepLearningTemplate/dataset"
-train_batch_size: 4
-valid_batch_size: 4
-image_size: 384
+train_batch_size: 2
+valid_batch_size: 1
 preload_images: false
 
 # ===================================================================
@@ -41,16 +36,17 @@ preload_images: false
 # ===================================================================
 # 架构与初始化 - 现在可以直接使用 tools/models/ 目录下的模型类名
 model:
-  model_name: unet
+  model_name: DualStreamTimmUnet
   model_kwargs:
-    in_channels: 4
+    model_config: "convnext_xlarge.fb_in22k_ft_in1k_384"
+    fusion_mode: "concat"
     num_classes: 6
 
 # ===================================================================
 # 训练策略 (Training Strategy)
 # ===================================================================
 # 核心循环
-epochs: 100
+epochs: 500
 val_check: 1.0 # 每个 epoch 结束后进行验证
 
 # 梯度与EMA
@@ -62,8 +58,8 @@ ema_decay: 0.999
 # 优化器与学习率调度 (Optimizer & LR Scheduler)
 # ===================================================================
 # 优化器参数
-learning_rate: 0.0004
-weight_decay: 0.05
+learning_rate: 0.0001
+weight_decay: 0.00008
 gradient_clip_val: 1000000.0
 
 # 学习率调度器参数 OneCycleLR 调度器
@@ -75,4 +71,4 @@ pct_start: 0.1
 # 状态管理
 resume: null
 save_checkpoint_num: 3
-save_metric: valid_loss
+save_metric: val_miou
