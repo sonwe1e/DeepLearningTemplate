@@ -69,27 +69,3 @@ def get_dataloader(opt):
     )
 
     return train_dataloader, valid_dataloader
-
-
-if __name__ == "__main__":
-    """数据集测试代码"""
-    opt = get_option()
-    train_dataloader, valid_dataloader = get_dataloader(opt)
-
-    print("=" * 50)
-    print("数据加载器测试")
-    print("=" * 50)
-    print(f"训练数据集大小: {len(train_dataloader.dataset)}")
-    print(f"验证数据集大小: {len(valid_dataloader.dataset)}")
-    print(f"训练批次数量: {len(train_dataloader)}")
-    print(f"验证批次数量: {len(valid_dataloader)}")
-
-    for i, batch in enumerate(train_dataloader):
-        print(f"\n第 {i + 1} 个批次:")
-        print(f"图像形状: {batch['image'].shape}")
-        print(f"标签信息: {torch.unique(batch['label'])}")
-        print(f"图像数据类型: {batch['image'].dtype}")
-        print(f"图像数值范围: [{batch['image'].min():.3f}, {batch['image'].max():.3f}]")
-        break
-
-    print("\n数据加载器测试完成！")
