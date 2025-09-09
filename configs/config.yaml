@@ -15,8 +15,8 @@ log_step: 50
 # ===================================================================
 # 硬件资源
 devices:
-  - 5
-num_workers: 16
+  - 0
+num_workers: 4
 
 # 性能优化
 precision: bf16-mixed
@@ -50,7 +50,7 @@ val_check: 1.0 # 每个 epoch 结束后进行验证
 
 # 梯度与EMA
 accumulate_grad_batches: 1
-use_ema: true
+use_ema: false
 ema_decay: 0.999
 
 # ===================================================================
@@ -59,7 +59,7 @@ ema_decay: 0.999
 # 优化器参数
 learning_rate: 0.0004
 weight_decay: 0.05
-gradient_clip_val: 1000000.0
+gradient_clip_val: 12.0
 
 # 学习率调度器参数 OneCycleLR 调度器
 pct_start: 0.1
@@ -70,4 +70,4 @@ pct_start: 0.1
 # 状态管理
 resume: null
 save_checkpoint_num: 3
-save_metric: valid_loss
+save_metric: train_loss

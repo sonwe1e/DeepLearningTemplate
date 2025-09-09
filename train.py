@@ -52,7 +52,7 @@ def main():
                 mode="min",
                 save_top_k=opt.save_checkpoint_num,
                 save_last=False,
-                filename="epoch_{epoch}-loss_{loss/valid_loss:.3f}",
+                filename="epoch_{epoch}-loss_{loss/train_loss:.3f}",
                 auto_insert_metric_name=False,
             )
         ],

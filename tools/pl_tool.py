@@ -91,9 +91,7 @@ class LightningModule(pl.LightningModule):
                 self.optimizer,
                 max_lr=self.learning_rate,
                 total_steps=self.trainer.estimated_stepping_batches,
-                pct_start=0.05,
-                div_factor=10,
-                final_div_factor=100,
+                pct_start=getattr(self.opt, "pct_start", 0.05),
             )
 
         return {
@@ -101,7 +99,6 @@ class LightningModule(pl.LightningModule):
             "lr_scheduler": {
                 "scheduler": self.scheduler,
                 "interval": "step",
-                "frequency": 1,
             },
         }
 
