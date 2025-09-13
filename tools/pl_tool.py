@@ -112,9 +112,6 @@ class LightningModule(pl.LightningModule):
         pred = self.forward(image)
         loss = self.loss1(pred, label)
 
-        if self.use_ema and self.ema_initialized:
-            self.ema.update()
-
         self.log("loss/train_loss", loss, prog_bar=True)
         return loss
 
@@ -133,13 +130,15 @@ class LightningModule(pl.LightningModule):
             self.ema.restore()
 
         self.log("loss/valid_loss", loss, prog_bar=True)
-
-        with torch.no_grad():
-            pred_class = torch.argmax(pred, dim=1)
-            accuracy = (pred_class == label).float().mean()
-            self.log("accuracy", accuracy, prog_bar=True)
+        pred_class = torch.argmax(pred, dim=1)
+        accuracy = (pred_class == label).float().mean()
+        self.log("accuracy", accuracy, prog_bar=True)
 
         return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if self.use_ema and self.ema_initialized:
+            self.ema.update()
 
     def on_train_epoch_end(self):
         """训练轮次结束回调"""
