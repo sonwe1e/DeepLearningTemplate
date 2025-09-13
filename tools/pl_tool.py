@@ -79,20 +79,18 @@ class LightningModule(pl.LightningModule):
 
     def configure_optimizers(self):
         """配置优化器和学习率调度器"""
-        if not hasattr(self, "optimizer"):
-            self.optimizer = torch.optim.AdamW(
-                self.parameters(),
-                lr=self.learning_rate,
-                weight_decay=getattr(self.opt, "weight_decay", 1e-4),
-            )
+        self.optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=getattr(self.opt, "weight_decay", 1e-4),
+        )
 
-        if not hasattr(self, "scheduler"):
-            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                self.optimizer,
-                max_lr=self.learning_rate,
-                total_steps=self.trainer.estimated_stepping_batches,
-                pct_start=getattr(self.opt, "pct_start", 0.05),
-            )
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=self.learning_rate,
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=getattr(self.opt, "pct_start", 0.05),
+        )
 
         return {
             "optimizer": self.optimizer,

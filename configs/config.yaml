@@ -36,7 +36,7 @@ image_size: 384
 # ===================================================================
 # 架构与初始化 - 现在可以直接使用 tools/models/ 目录下的模型类名
 model:
-  model_name: test_network
+  model_name: Simple2DNetwork
   model_kwargs:
     in_channels: 3
     num_classes: 3

@@ -1,12 +1,9 @@
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from configs.option import get_option
 
 
-def get_transforms():
-    """获取数据变换，延迟加载配置"""
-    opt, _ = get_option(verbose=False)
-
+def build_transforms(opt):
+    """基于传入的opt构建数据变换"""
     train_transform = A.Compose(
         [
             A.Resize(opt.image_size, opt.image_size),
@@ -27,23 +24,22 @@ def get_transforms():
 
 
 class _TransformLoader:
-    def __init__(self):
+    def __init__(self, opt):
+        self.opt = opt
         self._train_transform = None
         self._valid_transform = None
+        self._cached_size = None
 
     @property
     def train_transform(self):
-        if self._train_transform is None:
-            self._train_transform, self._valid_transform = get_transforms()
+        if self._train_transform is None or self._cached_size != self.opt.image_size:
+            self._train_transform, self._valid_transform = build_transforms(self.opt)
+            self._cached_size = self.opt.image_size
         return self._train_transform
 
     @property
     def valid_transform(self):
-        if self._valid_transform is None:
-            self._train_transform, self._valid_transform = get_transforms()
+        if self._valid_transform is None or self._cached_size != self.opt.image_size:
+            self._train_transform, self._valid_transform = build_transforms(self.opt)
+            self._cached_size = self.opt.image_size
         return self._valid_transform
-
-
-_loader = _TransformLoader()
-train_transform = _loader.train_transform
-valid_transform = _loader.valid_transform

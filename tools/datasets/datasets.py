@@ -2,8 +2,7 @@
 
 import torch
 import numpy as np
-from configs.option import get_option
-from .augments import train_transform, valid_transform
+from .augments import build_transforms
 
 
 class Dataset(torch.utils.data.Dataset):
@@ -35,8 +34,11 @@ class Dataset(torch.utils.data.Dataset):
         return None
 
 
+# ...existing code...
 def get_dataloader(opt):
     """创建训练和验证数据加载器"""
+    train_transform, valid_transform = build_transforms(opt)
+
     train_dataset = Dataset(
         phase="train",
         opt=opt,
@@ -51,6 +53,14 @@ def get_dataloader(opt):
         valid_transform=valid_transform,
     )
 
+    def _worker_init_fn(worker_id):
+        seed = int(opt.seed) + worker_id
+        torch.manual_seed(seed)
+        np.random.seed(seed % (2**32 - 1))
+
+    g = torch.Generator()
+    g.manual_seed(int(opt.seed))
+
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=opt.train_batch_size,
@@ -58,6 +68,8 @@ def get_dataloader(opt):
         num_workers=opt.num_workers,
         pin_memory=True,
         drop_last=True,
+        worker_init_fn=_worker_init_fn,
+        generator=g,
     )
 
     valid_dataloader = torch.utils.data.DataLoader(
@@ -66,6 +78,8 @@ def get_dataloader(opt):
         shuffle=False,
         num_workers=opt.num_workers,
         pin_memory=True,
+        worker_init_fn=_worker_init_fn,
+        generator=g,
     )
 
     return train_dataloader, valid_dataloader

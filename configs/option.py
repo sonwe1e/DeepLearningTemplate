@@ -11,7 +11,12 @@ _DEFAULT_CONFIG_PATH = None
 def set_default_config_path(path: str):
     """设置全局默认配置路径"""
     global _DEFAULT_CONFIG_PATH
-    _DEFAULT_CONFIG_PATH = path
+    p = Path(path).expanduser()
+    if p.is_dir():
+        p = p / "config.yaml"
+    if not p.exists():
+        raise FileNotFoundError(f"配置文件不存在: {p}")
+    _DEFAULT_CONFIG_PATH = str(p)
 
 
 def get_option(
@@ -20,17 +25,6 @@ def get_option(
     verbose: bool = True,
 ):
     """
-    加载、合并和保存实验配置。
-
-    处理流程:
-    1. 从 default_config_path (如 'config.yaml') 加载基线配置。
-    2. 基于基线配置动态构建命令行参数解析器 (argparse)。
-    3. 解析命令行传入的参数。
-    4. 将命令行参数覆盖到基线配置上，形成最终的有效配置。
-    5. 基于项目名(project)和实验名(exp_name)创建一个带时间戳的唯一实验目录。
-    6. 将最终有效配置保存到该实验目录中 (如 'experiments/Test/baselinev1/2023-10-27_10-30-00/effective_config.yaml')。
-    7. 返回包含最终配置的 Namespace 对象和实验目录路径。
-
     Args:
         default_config_path (str): 默认配置文件的路径。
         output_root (str): 所有实验输出的根目录。
@@ -41,19 +35,16 @@ def get_option(
     """
     # 优先级：函数参数 > 全局变量 > 环境变量 > 默认值
     if default_config_path is None:
-        default_config_path = (
-            _DEFAULT_CONFIG_PATH or os.environ.get("CONFIG_PATH") or "config.yaml"
+        default_config_path = _DEFAULT_CONFIG_PATH or str(
+            Path(__file__).parent / "config.yaml"
         )
 
     # --- 1. 加载基线配置 ---
     config_path_obj = Path(default_config_path)
     if config_path_obj.exists():
         with open(config_path_obj, "r", encoding="utf-8") as f:
-            # 使用 ruamel.yaml 可以保留注释，但这里我们只需要读取，所以 pyyaml 也可以
-            # 为了简单起见，我们继续使用 pyyaml，因为我们不写回原文件
             yaml_config = yaml.safe_load(f) or {}
     else:
-        # 如果没有配置文件，就不能动态生成 parser，这是一个严重的问题
         raise FileNotFoundError(f"默认配置文件未找到: {default_config_path}")
 
     # --- 2. 基于基线配置构建解析器 ---
