@@ -1,4 +1,3 @@
-import os
 import importlib
 import inspect
 from pathlib import Path
@@ -7,7 +6,6 @@ from typing import Dict, Type, Optional
 from rich.console import Console
 from rich.traceback import install
 
-# richer traceback
 # install(show_locals=True)
 
 
@@ -21,9 +19,8 @@ class ModelRegistry:
         self.console = Console()
 
     def _get_models_dir(self) -> Path:
-        """获取模型目录路径"""
         if self._models_dir is None:
-            self._models_dir = Path(__file__).parent / "models"
+            self._models_dir = Path(__file__).parent
         return self._models_dir
 
     def _discover_models(self):
@@ -47,7 +44,7 @@ class ModelRegistry:
                 continue
 
             try:
-                module_name = f"tools.models.{py_file.stem}"
+                module_name = f"tools.model.{py_file.stem}"
                 self.console.print(f"正在导入模块: [green]{module_name}[/green]")
                 module = importlib.import_module(module_name)
 
@@ -65,7 +62,7 @@ class ModelRegistry:
 
             except Exception as e:
                 self.console.print(f"[red]导入模型文件 {py_file} 时出错:[/red] {e}")
-                raise  # rich.traceback 会自动格式化
+                raise
 
         self._discovered = True
         self.console.print(

@@ -2,6 +2,7 @@
 
 import torch
 import lightning.pytorch as pl
+from tools.loss import get_loss
 
 torch.set_float32_matmul_precision("high")
 
@@ -58,7 +59,15 @@ class LightningModule(pl.LightningModule):
         self.dataset_len = dataset_len
         self.model = model
 
-        self.loss1 = torch.nn.CrossEntropyLoss()
+        loss_cfg = getattr(self.opt, "loss", None)
+        if isinstance(loss_cfg, dict):
+            self.loss1 = get_loss(loss_cfg.get("loss_type", "cross_entropy"), **loss_cfg.get("loss_kwargs", {}))
+            self.pred_key = loss_cfg.get("pred_key", "classes")
+            self.target_key = loss_cfg.get("target_key", "label")
+        else:
+            self.loss1 = torch.nn.CrossEntropyLoss()
+            self.pred_key = "classes"
+            self.target_key = "label"
 
         self.use_ema = getattr(opt, "use_ema", True)
         self.ema_decay = getattr(opt, "ema_decay", 0.999)
@@ -104,32 +113,26 @@ class LightningModule(pl.LightningModule):
         """训练步骤"""
         self._init_ema()
 
-        image = batch["image"]
-        label = batch["label"]
-
-        pred = self.forward(image)
-        loss = self.loss1(pred, label)
+        pred = self.forward(batch["image"])
+        loss = self.loss1(pred[self.pred_key], batch[self.target_key])
 
         self.log("loss/train_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         """验证步骤"""
-        image = batch["image"]
-        label = batch["label"]
-
         if self.use_ema and self.ema_initialized:
             self.ema.apply_shadow()
 
-        pred = self.forward(image)
-        loss = self.loss1(pred, label)
+        pred = self.forward(batch["image"])
+        loss = self.loss1(pred[self.pred_key], batch[self.target_key])
 
         if self.use_ema and self.ema_initialized:
             self.ema.restore()
 
         self.log("loss/valid_loss", loss, prog_bar=True)
-        pred_class = torch.argmax(pred, dim=1)
-        accuracy = (pred_class == label).float().mean()
+        pred_class = torch.argmax(pred[self.pred_key], dim=1)
+        accuracy = (pred_class == batch[self.target_key]).float().mean()
         self.log("accuracy", accuracy, prog_bar=True)
 
         return loss

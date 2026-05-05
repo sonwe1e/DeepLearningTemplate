@@ -5,17 +5,16 @@ import lightning.pytorch as pl
 from lightning.pytorch.loggers import WandbLogger
 import wandb
 import os
-from configs.option import get_option, set_default_config_path
-from tools.model_registry import get_model, list_available_models
-from tools.pl_tool import LightningModule
-from tools.datasets.datasets import get_dataloader
+import config
+from tools.model import get_model, list_available_models
+from tools.data import get_dataloader
+from pl_tool import LightningModule
 
 torch.set_float32_matmul_precision("high")
 
 
 def main():
-    set_default_config_path("./configs/config.yaml")
-    opt, checkpoint_path = get_option()
+    opt, checkpoint_path = config.get_option()
 
     pl.seed_everything(opt.seed)
 
