@@ -1,5 +1,6 @@
 """实验配置 — 修改下方默认值后运行 python train.py"""
 import argparse
+import inspect
 from pathlib import Path
 from datetime import datetime
 
@@ -16,7 +17,7 @@ log_step: int = 50
 # 硬件与性能
 # ============================================================
 devices: list = [0]
-num_workers: int = 4
+num_workers: int = 0  # Windows 用 0 避免多进程 pickle 问题，Linux 可调大
 precision: str = "bf16-mixed"
 
 # ============================================================
@@ -33,7 +34,7 @@ image_size: int = 384
 # ============================================================
 model: dict = {
     "model_name": "Simple2DNetwork",
-    "model_kwargs": {"in_channels": 3, "num_classes": 3},
+    "model_kwargs": {"in_channels": 3, "num_classes": 10},
 }
 
 # ============================================================
@@ -76,6 +77,7 @@ def get_option(verbose: bool = True):
     defaults = {
         k: v for k, v in globals().items()
         if not k.startswith("_") and not callable(v) and not isinstance(v, type)
+        and not inspect.ismodule(v)
     }
     # 处理特殊的 None 默认值
     for k in list(defaults.keys()):

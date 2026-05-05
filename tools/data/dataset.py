@@ -32,6 +32,12 @@ _DATASETS = {
 }
 
 
+def _worker_init_fn(worker_id, base_seed):
+    seed = base_seed + worker_id
+    torch.manual_seed(seed)
+    np.random.seed(seed % (2 ** 32 - 1))
+
+
 def get_dataloader(opt):
     train_transform, valid_transform = build_transforms(opt)
 
@@ -43,22 +49,19 @@ def get_dataloader(opt):
     train_dataset = cls("train", opt, train_transform, valid_transform)
     valid_dataset = cls("valid", opt, train_transform, valid_transform)
 
-    def _worker_init_fn(worker_id):
-        seed = int(opt.seed) + worker_id
-        torch.manual_seed(seed)
-        np.random.seed(seed % (2 ** 32 - 1))
-
+    base_seed = int(opt.seed)
     g = torch.Generator()
-    g.manual_seed(int(opt.seed))
+    g.manual_seed(base_seed)
 
+    from functools import partial
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=opt.train_batch_size, shuffle=True,
         num_workers=opt.num_workers, pin_memory=True, drop_last=True,
-        worker_init_fn=_worker_init_fn, generator=g,
+        worker_init_fn=partial(_worker_init_fn, base_seed=base_seed), generator=g,
     )
     valid_dataloader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.valid_batch_size, shuffle=False,
         num_workers=opt.num_workers, pin_memory=True,
-        worker_init_fn=_worker_init_fn, generator=g,
+        worker_init_fn=partial(_worker_init_fn, base_seed=base_seed), generator=g,
     )
     return train_dataloader, valid_dataloader
