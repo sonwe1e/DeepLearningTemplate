@@ -1,3 +1,30 @@
-**/wandb
-**/checkpoints
-**/__pycache__data/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 训练产出
+wandb/
+checkpoints/
+experiments/
+
+# 数据集
+data/
+*.tar.gz
+*.tar
+
+# 模型文件
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+
+# IDE
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db
