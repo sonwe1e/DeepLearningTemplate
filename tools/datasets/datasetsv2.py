@@ -1,11 +1,13 @@
-import torch
-import numpy as np
+"""
+预取数据加载器 — 通过 CUDA stream 或 CPU 线程提前将下一批数据加载到目标设备
+
+使用方式: 在 config.yaml 中设置 use_prefetch: true
+"""
+
 import queue as Queue
 import threading
+import torch
 import torch.utils.data as data
-from concurrent.futures import ThreadPoolExecutor
-from configs.option import get_option
-from .augments import train_transform, valid_transform
 
 
 class PrefetchGenerator(threading.Thread):
@@ -126,12 +128,11 @@ class CUDAPrefetcher:
         self.preload()
 
 
-# 新增：可枚举的预取器迭代器类
 class PrefetcherIterator:
-    """可迭代的预取器包装类，使预取器可以在for循环中使用enumerate。
+    """可迭代的预取器包装类，使预取器可以在 for 循环中使用 enumerate。
 
     Args:
-        prefetcher: CPU或CUDA预取器。
+        prefetcher: CPU 或 CUDA 预取器。
     """
 
     def __init__(self, prefetcher, length=None):
@@ -153,107 +154,3 @@ class PrefetcherIterator:
 
     def __len__(self):
         return self.length if self.length is not None else 0
-
-
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, phase, opt, train_transform=None, valid_transform=None):
-        self.phase = phase
-        self.data_path = opt.data_path
-        self.transform = train_transform if phase == "train" else valid_transform
-        self.image_list = [0] * 100
-
-    def __getitem__(self, index):
-        image = np.random.randint(0, 255, (256, 256, 3)).astype(np.uint8)
-        label = 1
-        if self.transform is not None:
-            augmented = self.transform(image=image)
-            image = augmented["image"]
-        return {"image": image, "label": label}
-
-    def __len__(self):
-        return len(self.image_list)
-
-    def load_image(self, path):
-        return None
-
-
-def get_dataloader(opt):
-    """获取数据加载器和预取迭代器。
-
-    Args:
-        opt: 配置选项
-
-    Returns:
-        tuple: 训练和验证数据的预取迭代器
-    """
-    # 创建数据集
-    train_dataset = Dataset(
-        phase="train",
-        opt=opt,
-        train_transform=train_transform,
-        valid_transform=valid_transform,
-    )
-    valid_dataset = Dataset(
-        phase="valid",
-        opt=opt,
-        train_transform=train_transform,
-        valid_transform=valid_transform,
-    )
-
-    # 创建预取数据加载器
-    train_dataloader = PrefetchDataLoader(
-        num_prefetch_queue=opt.prefetch_queue_size,
-        dataset=train_dataset,
-        batch_size=opt.train_batch_size,
-        shuffle=True,
-        num_workers=opt.num_workers,
-        pin_memory=True,
-        drop_last=True,
-    )
-    valid_dataloader = PrefetchDataLoader(
-        num_prefetch_queue=opt.prefetch_queue_size,
-        dataset=valid_dataset,
-        batch_size=opt.valid_batch_size,
-        shuffle=False,
-        num_workers=opt.num_workers,
-        pin_memory=True,
-    )
-
-    # 根据GPU可用性创建对应的预取器
-    if len(opt.devices) > 0 and torch.cuda.is_available():
-        train_prefetcher = CUDAPrefetcher(train_dataloader, opt)
-        valid_prefetcher = CUDAPrefetcher(valid_dataloader, opt)
-    else:
-        train_prefetcher = CPUPrefetcher(train_dataloader)
-        valid_prefetcher = CPUPrefetcher(valid_dataloader)
-
-    # 创建可迭代的预取器
-    train_iterator = PrefetcherIterator(
-        train_prefetcher,
-        length=len(train_dataset) // opt.train_batch_size,
-    )
-    valid_iterator = PrefetcherIterator(
-        valid_prefetcher,
-        length=len(valid_dataset) // opt.valid_batch_size,
-    )
-
-    return train_iterator, valid_iterator
-
-
-if __name__ == "__main__":
-    opt = get_option()
-
-    # 获取预取迭代器
-    train_iterator, valid_iterator = get_dataloader(opt)
-
-    # 使用enumerate遍历预取的数据
-    for i, batch in enumerate(train_iterator):
-        print(f"Batch {i}:", batch["image"].shape, torch.unique(batch["label"]))
-        if i >= 2:  # 仅示例几个批次
-            break
-
-    print("\nValidation data:")
-    for i, batch in enumerate(valid_iterator):
-        print(f"Batch {i}:", batch["image"].shape, torch.unique(batch["label"]))
-        if i >= 2:  # 仅示例几个批次
-            break

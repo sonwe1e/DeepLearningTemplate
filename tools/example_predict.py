@@ -69,8 +69,11 @@ from tools.utils import load_model
 
 
 def _ensure_config_path():
-    """确保配置文件路径已设置"""
-    config_path = "/media/hdd/sonwe1e/Template/configs/config.yaml"
+    """确保配置文件路径已设置，优先使用环境变量 CONFIG_PATH"""
+    config_path = os.environ.get(
+        "CONFIG_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs", "config.yaml"),
+    )
     set_default_config_path(config_path)
 
 
@@ -406,10 +409,6 @@ def main():
     # 确保配置文件路径已设置
     _ensure_config_path()
 
-    # 设置配置文件路径
-    config_path = "/media/hdd/sonwe1e/Template/configs/config.yaml"
-    set_default_config_path(config_path)
-
     # 加载配置
     opt, checkpoint_dir = get_option()
 
@@ -417,9 +416,12 @@ def main():
     get_dataloader, _ = _import_data_modules()
 
     # ==================== 检查点路径设置 ====================
-    # TODO: 修改为你的实际检查点路径
-    # 可以从 experiments/ 目录下找到训练好的检查点
-    ckpt_path = "/media/hdd/sonwe1e/Template/experiments/baselinev1_2025-06-29_21-16-53/checkpoints/epoch_0-loss_1.133.ckpt"
+    # 通过环境变量 CKPT_PATH 指定，或自动从 experiments 目录查找
+    ckpt_path = os.environ.get("CKPT_PATH")
+    if not ckpt_path:
+        import glob
+        candidates = sorted(glob.glob("experiments/*/checkpoints/*.ckpt"), reverse=True)
+        ckpt_path = candidates[0] if candidates else ""
 
     # 检查检查点是否存在
     if not os.path.exists(ckpt_path):
@@ -444,8 +446,8 @@ def main():
     print("步骤 2: 单张图像预测")
     print("=" * 50)
 
-    # 示例图像路径（可以修改为你的图像路径）
-    test_image_path = "/media/hdd/sonwe1e/Template/temp_data/cat.png"
+    # 测试图像路径 — 优先使用环境变量，否则用 temp_data 下的图片
+    test_image_path = os.environ.get("TEST_IMAGE_PATH", os.path.join("temp_data", "cat.png"))
 
     # 进行预测
     single_result = predict_single_image(

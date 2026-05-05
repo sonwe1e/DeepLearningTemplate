@@ -27,6 +27,8 @@ prefetch_queue_size: 16 # DataLoader 预取队列，与 num_workers 配合
 # ===================================================================
 # 数据源与尺寸
 data_path: ""
+data_type: mock  # 数据集类型: mock, cifar10, image_folder
+use_prefetch: false  # 是否启用预取加速 (datasetsv2)
 train_batch_size: 32
 valid_batch_size: 32
 image_size: 384
@@ -56,6 +58,11 @@ ema_decay: 0.999
 # ===================================================================
 # 优化器与学习率调度 (Optimizer & LR Scheduler)
 # ===================================================================
+# 损失函数: cross_entropy, focal
+loss:
+  loss_type: cross_entropy
+  loss_kwargs: {}
+
 # 优化器参数
 learning_rate: 0.0004
 weight_decay: 0.05

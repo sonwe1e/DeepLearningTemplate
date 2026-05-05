@@ -64,17 +64,13 @@ def get_option(
     )
 
     for key, value in yaml_config.items():
-        # 这个布尔逻辑是正确的：
-        # 如果默认是 True，我们提供一个 store_false 的 flag (例如 --no-ema)
-        # 如果默认是 False，我们提供一个 store_true 的 flag (例如 --use-amp)
-        # 更好的做法是使用 BooleanOptionalAction (Python 3.9+)，但当前实现兼容性更广
         if isinstance(value, bool):
-            if value:
-                parser.add_argument(
-                    f"--{key}", action="store_false", dest=key
-                )  # 使用 dest 确保覆盖正确的键
-            else:
-                parser.add_argument(f"--{key}", action="store_true", dest=key)
+            # BooleanOptionalAction (Python 3.9+) 生成 --flag / --no-flag 两个开关
+            # default=None 保证未传参时不会覆盖 YAML 中的默认值
+            parser.add_argument(f"--{key}", action=argparse.BooleanOptionalAction, default=None)
+        elif isinstance(value, (dict, list)):
+            # 嵌套结构 (如 loss, model) 不支持 CLI 覆盖，跳过
+            pass
         else:
             # 对于列表类型，nargs='+' 或 '*' 更好，但为了保持与原逻辑一致，暂不修改
             parser.add_argument(

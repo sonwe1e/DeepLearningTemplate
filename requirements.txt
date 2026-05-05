@@ -1,9 +1,6 @@
-albumentations
-opencv-contrib-python
+-r requirements-core.txt
 jupyter
 matplotlib
-lightning
-wandb
 einops
 pandas
 scikit-learn
@@ -12,11 +9,9 @@ transformers
 kornia
 bitsandbytes
 peft
-timm
 openvino
 nncf
 lightgbm
 triton
-torchmetrics
 ultralytics
 heavyball

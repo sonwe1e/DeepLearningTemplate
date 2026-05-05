@@ -174,19 +174,17 @@ class LightningModule(pl.LightningModule):
             self.model = model
 
         # ==================== 损失函数定义 ====================
-        # 交叉熵损失，适用于多分类任务
-        #
-        # 如何自定义损失函数：
-        # 1. 回归任务：self.loss1 = torch.nn.MSELoss() 或 torch.nn.L1Loss()
-        # 2. 二分类任务：self.loss1 = torch.nn.BCEWithLogitsLoss()
-        # 3. 多标签分类：self.loss1 = torch.nn.MultiLabelSoftMarginLoss()
-        # 4. 自定义损失：from tools.losses import FocalLoss; self.loss1 = FocalLoss()
-        # 5. 组合损失：可以定义多个损失函数并在训练中组合使用
-        #
-        # 示例：添加辅助损失
-        # self.loss1 = torch.nn.CrossEntropyLoss()  # 主要损失
-        # self.loss2 = torch.nn.MSELoss()           # 辅助损失（如特征重建）
-        self.loss1 = torch.nn.CrossEntropyLoss()
+        # 从配置读取损失类型和参数，默认使用交叉熵
+        from .losses import get_loss
+
+        loss_cfg = getattr(self.opt, "loss", None)
+        if isinstance(loss_cfg, dict):
+            loss_type = loss_cfg.get("loss_type", "cross_entropy")
+            loss_kwargs = loss_cfg.get("loss_kwargs", {})
+        else:
+            loss_type = "cross_entropy"
+            loss_kwargs = {}
+        self.loss1 = get_loss(loss_type, **loss_kwargs)
 
         # ==================== EMA配置 ====================
         # 指数移动平均配置，用于提升模型性能

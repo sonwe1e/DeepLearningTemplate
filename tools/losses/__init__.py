@@ -11,11 +11,7 @@ class FocalLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        # inputs: [N, C]  预测类别概率
-        # targets: [N]     真实类别标签，需要是 one-hot 编码或者类别索引
-
-        if inputs.size(-1) != 1:  # 判断是否为二元分类，为二元分类做一些调整
-            # 非 one-hot 编码，转换为 one-hot 编码
+        if inputs.size(-1) != 1:
             if len(targets.shape) == 1:
                 targets = F.one_hot(targets, num_classes=inputs.size(-1)).float()
             ce_loss = F.binary_cross_entropy_with_logits(
@@ -25,10 +21,8 @@ class FocalLoss(nn.Module):
         else:
             ce_loss = F.binary_cross_entropy(
                 inputs.sigmoid(), targets.float(), reduction="none"
-            )  # 这里要用 sigmoid
+            )
             p_t = torch.exp(-ce_loss)
-        # p_t = (targets * inputs) + ((1 - targets) * (1 - inputs))  # 对于正样本 p_t = p, 对于负样本 p_t = 1 - p
-        # ce_loss = -torch.log(p_t)
         focal_loss = self.alpha * (1 - p_t) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
@@ -37,3 +31,21 @@ class FocalLoss(nn.Module):
             return focal_loss.sum()
         else:
             return focal_loss
+
+
+LOSS_REGISTRY = {
+    "cross_entropy": nn.CrossEntropyLoss,
+    "focal": FocalLoss,
+}
+
+
+def get_loss(loss_type: str, **kwargs):
+    """根据名称获取损失函数实例（不区分大小写）"""
+    key = loss_type.lower().replace(" ", "_")
+    if key not in LOSS_REGISTRY:
+        raise ValueError(f"未知损失函数: {loss_type}，可选: {list(LOSS_REGISTRY.keys())}")
+    cls = LOSS_REGISTRY[key]
+    try:
+        return cls(**kwargs)
+    except TypeError:
+        return cls()

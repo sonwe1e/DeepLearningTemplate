@@ -62,13 +62,15 @@ torch.set_float32_matmul_precision("high")
 if __name__ == "__main__":
     # ==================== 配置初始化 ====================
     # 设置默认配置文件路径，后续所有 get_option() 调用都会使用这个路径
-    # 这样可以避免每次调用时都需要传递配置文件路径
     #
     # 自定义配置文件：
-    # - 复制 configs/config.yaml 创建新的配置文件
-    # - 修改路径指向新的配置文件
-    # - 例如：set_default_config_path("./my_custom_config.yaml")
-    set_default_config_path("/media/hdd/sonwe1e/Template/configs/config.yaml")
+    # - 通过环境变量 CONFIG_PATH 指定配置文件路径
+    # - 或修改下方的默认路径相对引用
+    _CONFIG_PATH = os.environ.get(
+        "CONFIG_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "config.yaml"),
+    )
+    set_default_config_path(_CONFIG_PATH)
 
     # 加载训练配置和选项，同时获取检查点保存路径
     # opt: 包含所有训练参数的配置对象
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     # 2. 实现自定义的Dataset类，继承torch.utils.data.Dataset
     # 3. 在 datasets.py 中导入并注册新的数据集类
     # 4. 修改 get_dataloader 函数来使用新的数据集
-    from tools.datasets.datasets import *
+    from tools.datasets import get_dataloader
     from tools.model_registry import list_available_models, get_model
 
     # ==================== 随机种子设置 ====================
